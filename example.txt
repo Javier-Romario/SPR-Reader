@@ -1,0 +1,17 @@
+“The language is syntactically similar to C, so you’ll find things like for loops, semicolon-terminated statements, and curly braces denoting block structures.
+Crucially, Rust can guarantee memory safety through the use of a borrow checker that tracks which part of a program has safe access to different parts of memory.
+This safety does not come at the expense of performance, though.
+Rust programs compile to native binaries and often match or beat the speed of programs written in C or C++.
+For this reason, Rust is often described as a systems programming language that has been designed for performance and safety.
+
+Rust is a statically typed language like C/C++ or Java.
+This means that a variable can never change its type, such as from a number to a string, for example.
+You don’t always have to declare a variable’s type in Rust because the compiler can often figure it out from the context.
+This is in contrast to dynamically typed languages like Perl, JavaScript, or Python, where a variable can change its type at any point in the program, like from a string to a filehandle.
+
+Rust is not an object-oriented (OO) language like C++ or[…]”
+
+Excerpt From
+Command-Line Rust
+Ken Youens-Clark
+This material may be protected by copyright.
