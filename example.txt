@@ -1,17 +1,7 @@
-“The language is syntactically similar to C, so you’ll find things like for loops, semicolon-terminated statements, and curly braces denoting block structures.
-Crucially, Rust can guarantee memory safety through the use of a borrow checker that tracks which part of a program has safe access to different parts of memory.
-This safety does not come at the expense of performance, though.
-Rust programs compile to native binaries and often match or beat the speed of programs written in C or C++.
-For this reason, Rust is often described as a systems programming language that has been designed for performance and safety.
+In a dimly lit room, cluttered with half-drunk coffee cups and the echoes of failed attempts, Greg sat before his screen, eyes wide with ambition and terror. Rust. The language of fearless concurrency and unrelenting compiler errors. He had heard the tales, whispered in hushed tones across forums—borrow checker this, lifetime that—but with the bold ignorance of a man who once wrote a Python script and called himself a programmer, Greg dove in headfirst.
 
-Rust is a statically typed language like C/C++ or Java.
-This means that a variable can never change its type, such as from a number to a string, for example.
-You don’t always have to declare a variable’s type in Rust because the compiler can often figure it out from the context.
-This is in contrast to dynamically typed languages like Perl, JavaScript, or Python, where a variable can change its type at any point in the program, like from a string to a filehandle.
+His first program, a simple “Hello, World!” should have been a triumph. Instead, it was a battlefield of mismatched types and lifetimes beyond his understanding. The compiler, cold and unyielding, spoke to him in riddles: “expected &str, found String” and “move occurs because value has type, which does not implement the Copy trait.” Greg read the words, but they may as well have been ancient Sumerian. He took a deep breath, whispered a prayer to Linus Torvalds, and slapped an .unwrap() onto his code like duct tape on a sinking ship.
 
-Rust is not an object-oriented (OO) language like C++ or[…]”
+Days passed. Greg, now gaunt and hollow-eyed, had grown accustomed to the borrow checker’s harsh rebukes. He had written and rewritten his code more times than he cared to admit. At night, he dreamed of lifetimes, of structs yearning for ownership, of phantom references lingering like ghosts in a haunted heap. And yet, amidst the suffering, something miraculous happened—his program compiled. No warnings. No errors. A single, glorious cargo run later, his application sprang to life, printing the words: “Segmentation fault (core dumped).”
 
-Excerpt From
-Command-Line Rust
-Ken Youens-Clark
-This material may be protected by copyright.
+Greg exhaled. He had not bested Rust, nor had Rust bested him. They had merely reached an understanding—he would follow its rules, and in return, it would occasionally let him build something that worked. As he pushed his broken-yet-functional project to GitHub, he chuckled to himself. “Next time,” he muttered, “I’ll just use Python.” The compiler, ever watchful, remained silent—but Greg could almost hear it laughing.
