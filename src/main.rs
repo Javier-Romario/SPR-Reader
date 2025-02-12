@@ -39,6 +39,10 @@ struct Args {
     inline: Option<bool>,
 }
 
+struct Mode {
+    paused: bool,
+}
+
 fn main() -> Result<()> {
     color_eyre::install()?;
     let args = Args::parse();
@@ -58,6 +62,8 @@ fn main() -> Result<()> {
             "Either --text or --file must be provided",
         ).into()),
     };
+
+    let mut state = Mode { paused: false };
 
     // Split text into words
     let words: Vec<&str> = content.split_whitespace().collect();
@@ -135,13 +141,14 @@ fn main() -> Result<()> {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => break,
+                    KeyCode::Char(' ') => state.paused = !state.paused,
                     _ => {}
                 }
             }
         }
 
-        // Update word if time elapsed
-        if Instant::now() >= next_tick {
+        // Update word if time elapsed and not paused
+        if Instant::now() >= next_tick && state.paused == false {
             current_word = (current_word + 1) % words.len();
             next_tick = Instant::now() + delay;
         }
