@@ -10,7 +10,7 @@ The idea is that we need to read **a lot**, why not make it easier to do so on t
 
 The tool takes:
   - **Text** from the command line
-  - **Text** from STDIN
+  - ~~**Text** from STDIN~~
   - **Text** from files and various file types
 
 The tool does:
