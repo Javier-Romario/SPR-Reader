@@ -76,8 +76,6 @@ fn main() -> Result<()> {
 
     let is_inline = args.inline.unwrap_or(false);
 
-    // Calculate delay between words
-    let delay = Duration::from_secs_f64(60.0 / args.wpm as f64);
 
     if is_inline == false {
         // Setup terminal
@@ -96,6 +94,10 @@ fn main() -> Result<()> {
     });
 
     let mut current_word = 0;
+
+
+    let delay = Duration::from_secs_f64(60.0 / args.wpm as f64);
+
     let mut next_tick = Instant::now() + delay;
 
     // Main application loop
@@ -133,8 +135,17 @@ fn main() -> Result<()> {
             f.render_widget(paragraph, chunks[1]);
         })?;
 
+        // Calculate delay between words
+        let punctuation_delay = if words[current_word].chars().last().unwrap().is_ascii_punctuation() {
+            Duration::from_secs_f64(0.5)
+        } else {
+            Duration::from_secs(0)
+        };
+
+        // println!("punctuation_delay {}", punctuation_delay.as_secs());
+
         // Calculate time until next word update
-        let timeout = next_tick.saturating_duration_since(Instant::now());
+        let timeout = next_tick.saturating_duration_since(Instant::now() - punctuation_delay);
 
         // Check for user input
         if event::poll(timeout)? {
