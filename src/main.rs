@@ -1,3 +1,5 @@
+mod words;
+
 use clap::Parser;
 use color_eyre::Result;
 use crossterm::{
@@ -5,14 +7,17 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+
 use ratatui::{
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-    prelude::*,
-    widgets::Paragraph,
-    TerminalOptions,
-    Viewport
+    backend::CrosstermBackend, layout::{
+        Constraint,
+        Direction,
+        Layout,
+    }, prelude::*, widgets::{
+        Block, Borders, Paragraph
+    }, TerminalOptions, Viewport
 };
+
 use std::{
     fs,
     io::{self, stdout},
@@ -76,13 +81,12 @@ fn main() -> Result<()> {
 
     let is_inline = args.inline.unwrap_or(false);
 
-
     if is_inline == false {
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = stdout();
         execute!(stdout, EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(stdout);
+        let _backend = CrosstermBackend::new(stdout);
     }
 
     let mut terminal = ratatui::init_with_options(TerminalOptions {
@@ -103,15 +107,15 @@ fn main() -> Result<()> {
     // Main application loop
     let constraints = if is_inline == false {
     [
-        Constraint::Percentage(50),
         Constraint::Min(1),
-        Constraint::Percentage(50),
+        Constraint::Min(5),
+        Constraint::Min(1),
     ]
     } else {
     [
-        Constraint::Percentage(10),
         Constraint::Min(1),
-        Constraint::Percentage(10),
+        Constraint::Min(3),
+        Constraint::Min(1),
     ]
     };
     loop {
@@ -129,10 +133,20 @@ fn main() -> Result<()> {
                     .split(f.area())
             };
 
-            // Display current word
-            let paragraph = Paragraph::new(words[current_word])
-                .alignment(Alignment::Center);
-            f.render_widget(paragraph, chunks[1]);
+            // &str -> Line
+            let line = words::process_words(words[current_word]);
+
+            let para = Paragraph::new(
+                line
+            )
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        // .title("My Paragraph")
+                        .borders(Borders::TOP | Borders::BOTTOM), // Adds a border around the paragraph
+                );
+
+            f.render_widget(para, chunks[1]);
         })?;
 
         // Calculate delay between words
