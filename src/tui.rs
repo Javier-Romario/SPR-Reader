@@ -9,8 +9,8 @@ use std::io::{self, stdout};
 pub type Tui = Terminal<CrosstermBackend<io::Stdout>>;
 
 pub fn init(is_inline: bool) -> Result<Tui> {
+    enable_raw_mode()?;
     if !is_inline {
-        enable_raw_mode()?;
         execute!(stdout(), EnterAlternateScreen)?;
     }
     let backend = CrosstermBackend::new(io::stdout());
@@ -28,8 +28,8 @@ pub fn init(is_inline: bool) -> Result<Tui> {
 }
 
 pub fn restore(is_inline: bool, terminal: &mut Tui) -> Result<()> {
+    disable_raw_mode()?;
     if !is_inline {
-        disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     }
     Ok(())

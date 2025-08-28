@@ -1,6 +1,9 @@
 mod app;
 mod cli;
+mod events;
+mod state;
 mod tui;
+mod ui;
 
 use clap::Parser;
 use color_eyre::Result;
