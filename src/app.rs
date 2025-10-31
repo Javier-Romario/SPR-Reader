@@ -12,7 +12,13 @@ pub fn run<'a>(content: &'a str, wpm: u64, is_inline: bool, terminal: &mut Tui) 
 
     loop {
         terminal.draw(|f| {
-            ui::render_word_display(f, app_state.current_word(), &ui_constraints);
+            ui::render_word_display(
+                f,
+                app_state.current_word(),
+                app_state.current_word_index(),
+                app_state.total_words(),
+                &ui_constraints,
+            );
         })?;
 
         let timeout = app_state.get_timeout();

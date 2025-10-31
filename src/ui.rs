@@ -2,11 +2,11 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     prelude::*,
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{LineGauge, Paragraph},
 };
 
 pub struct UIConstraints {
-    pub constraints: [Constraint; 3],
+    pub constraints: [Constraint; 4],
 }
 
 impl UIConstraints {
@@ -15,12 +15,14 @@ impl UIConstraints {
             [
                 Constraint::Percentage(50),
                 Constraint::Min(1),
+                Constraint::Length(2),
                 Constraint::Percentage(50),
             ]
         } else {
             [
                 Constraint::Percentage(10),
                 Constraint::Min(1),
+                Constraint::Length(2),
                 Constraint::Percentage(10),
             ]
         };
@@ -42,7 +44,7 @@ fn find_focus_point(word: &str) -> usize {
     }
 }
 
-pub fn render_word_display(frame: &mut Frame, word: &str, constraints: &UIConstraints) {
+pub fn render_word_display(frame: &mut Frame, word: &str, current_word: usize, total_words: usize, constraints: &UIConstraints) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints.constraints)
@@ -75,4 +77,21 @@ pub fn render_word_display(frame: &mut Frame, word: &str, constraints: &UIConstr
 
     let paragraph = Paragraph::new(line).alignment(Alignment::Left);
     frame.render_widget(paragraph, chunks[1]);
+
+    // Render progress bar
+    let progress = (current_word + 1) as f64 / total_words as f64;
+    let progress_label = format!("{}/{}", current_word + 1, total_words);
+
+    let progress_bar = LineGauge::default()
+        .filled_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .line_set(symbols::line::THICK)
+        .ratio(progress)
+        .label(progress_label);
+
+    frame.render_widget(progress_bar, chunks[2]);
 }

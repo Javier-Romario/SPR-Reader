@@ -57,4 +57,12 @@ impl<'a> AppState<'a> {
         self.next_tick.saturating_duration_since(Instant::now()) + punctuation_delay
     }
 
+    pub fn current_word_index(&self) -> usize {
+        self.current_word
+    }
+
+    pub fn total_words(&self) -> usize {
+        self.words.len()
+    }
+
 }
