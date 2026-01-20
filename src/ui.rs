@@ -44,7 +44,14 @@ fn find_focus_point(word: &str) -> usize {
     }
 }
 
-pub fn render_word_display(frame: &mut Frame, word: &str, current_word: usize, total_words: usize, constraints: &UIConstraints) {
+pub fn render_word_display(
+    frame: &mut Frame,
+    word: &str,
+    current_word: usize,
+    total_words: usize,
+    is_paused: bool,
+    constraints: &UIConstraints,
+) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints.constraints)
@@ -55,7 +62,10 @@ pub fn render_word_display(frame: &mut Frame, word: &str, current_word: usize, t
 
     // Split word into before, focus, and after
     let before: String = chars.iter().take(focus_idx).collect();
-    let focus = chars.get(focus_idx).map(|c| c.to_string()).unwrap_or_default();
+    let focus = chars
+        .get(focus_idx)
+        .map(|c| c.to_string())
+        .unwrap_or_default();
     let after: String = chars.iter().skip(focus_idx + 1).collect();
 
     // Calculate padding to center the focus character
@@ -80,12 +90,20 @@ pub fn render_word_display(frame: &mut Frame, word: &str, current_word: usize, t
 
     // Render progress bar
     let progress = (current_word + 1) as f64 / total_words as f64;
-    let progress_label = format!("{}/{}", current_word + 1, total_words);
+    let progress_label = if is_paused {
+        format!("{}/{} - PAUSED", current_word + 1, total_words)
+    } else {
+        format!("{}/{}", current_word + 1, total_words)
+    };
 
     let progress_bar = LineGauge::default()
         .filled_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(if is_paused {
+                    Color::Yellow
+                } else {
+                    Color::Cyan
+                })
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         )
