@@ -16,6 +16,8 @@ pub struct Config {
     pub show_progress_bar: bool,
     #[serde(default = "default_enable_animations")]
     pub enable_animations: bool,
+    #[serde(default = "default_inline")]
+    pub inline: bool,
 }
 
 fn default_border_color() -> String {
@@ -38,6 +40,10 @@ fn default_enable_animations() -> bool {
     true
 }
 
+fn default_inline() -> bool {
+    true
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -46,6 +52,7 @@ impl Default for Config {
             show_border: default_show_border(),
             show_progress_bar: default_show_progress_bar(),
             enable_animations: default_enable_animations(),
+            inline: default_inline(),
         }
     }
 }

@@ -12,6 +12,7 @@ use color_eyre::Result;
 fn main() -> Result<()> {
     color_eyre::install()?;
     let args = cli::Args::parse();
+    let config = config::Config::load()?;
 
     let content = cli::get_content(&args)?;
 
@@ -22,7 +23,8 @@ fn main() -> Result<()> {
         );
     }
 
-    let is_inline = args.inline.unwrap_or(false);
+    // Use CLI arg if provided, otherwise use config value
+    let is_inline = args.inline.unwrap_or(config.inline);
 
     let mut terminal = tui::init(is_inline)?;
 

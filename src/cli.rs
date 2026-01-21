@@ -17,8 +17,15 @@ pub struct Args {
     #[arg(long, default_value = "300")]
     pub wpm: u64,
 
-    /// Inline mode
-    #[arg(short, long, default_value = "false")]
+    /// Inline mode (defaults to config value if not specified)
+    #[arg(
+        short,
+        long,
+        default_missing_value = "true",
+        num_args = 0..=1,
+        require_equals = false,
+        action = clap::ArgAction::Set
+    )]
     pub inline: Option<bool>,
 }
 
