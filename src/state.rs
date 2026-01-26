@@ -24,7 +24,7 @@ impl<'a> AppState<'a> {
     }
 
     pub fn current_word(&self) -> &str {
-        self.words[self.current_word]
+        self.words.get(self.current_word)
     }
 
     pub fn toggle_pause(&mut self) {
