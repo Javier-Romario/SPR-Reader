@@ -23,8 +23,8 @@ impl<'a> AppState<'a> {
         }
     }
 
-    pub fn current_word(&self) -> &str {
-        self.words[self.current_word]
+    pub fn current_word(&self) -> Option<&str> {
+        self.words.get(self.current_word).copied()
     }
 
     pub fn toggle_pause(&mut self) {
@@ -46,7 +46,9 @@ impl<'a> AppState<'a> {
     }
 
     pub fn get_timeout(&self) -> Duration {
-        let last_char = self.current_word().chars().last().unwrap_or(' ');
+        let last_char = self.current_word()
+            .and_then(|word| word.chars().last())
+            .unwrap_or(' ');
 
         // Only pause on sentence-ending punctuation
         let punctuation_delay = if matches!(last_char, '.' | '!' | '?' | ';') {

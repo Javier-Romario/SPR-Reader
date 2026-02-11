@@ -5,15 +5,14 @@ and I am a programmer, so why not create tooling which aides me in my work and m
 
 That is how SPR came about, influenced by [Stutter](), [Ratatui and Orhun's amazing work]() 
 along with the likes of [TJ De'vries]() and [Neovim]() workflows.
-
 The idea is that we need to read **a lot**, why not make it easier to do so on the command line.
 
-The tool takes:
-  - **Text** from the command line
-  - ~~**Text** from STDIN~~
-  - **Text** from files and various file types
+**Key Features:**
 
-The tool does:
-  - Display inline within a TUI
-  - Display fullscreen
-  - Various reading speeds
+- 📖 Speed reading with configurable WPM
+- 🎯 Focus point highlighting (Spritz algorithm)
+- 🖥️ Dual modes: fullscreen and inline (5-line viewport)
+- 📊 Visual progress tracking
+- ⏸️ Interactive pause/resume controls
+- 🎨 Customizable colors and animations
+- ⚙️ TOML-based configuration system
