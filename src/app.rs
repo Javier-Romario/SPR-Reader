@@ -104,6 +104,11 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
     // Track total elapsed time for animations
     let session_start = Instant::now();
 
+    // Help overlay state
+    let mut show_help = false;
+    let mut help_scroll: u16 = 0;
+    let help_border_color = config.parse_border_color();
+
     // Mark first use as complete
     if is_first_use && is_inline {
         Config::mark_first_use_complete()?;
@@ -158,13 +163,41 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
                 f.buffer_mut(),
                 screen_area,
             );
+
+            // Render help popup on top of everything else
+            if show_help {
+                ui::render_help_popup(f, help_border_color, help_scroll);
+            }
         })?;
 
         let timeout = app_state.get_timeout();
 
         match events::handle_events(timeout)? {
-            events::AppEvent::Quit => break,
+            events::AppEvent::Quit => {
+                if show_help {
+                    show_help = false;
+                    help_scroll = 0;
+                } else {
+                    break;
+                }
+            }
             events::AppEvent::TogglePause => app_state.toggle_pause(),
+            events::AppEvent::ToggleHelp => {
+                show_help = !show_help;
+                if !show_help {
+                    help_scroll = 0;
+                }
+            }
+            events::AppEvent::ScrollDown => {
+                if show_help {
+                    help_scroll = help_scroll.saturating_add(1);
+                }
+            }
+            events::AppEvent::ScrollUp => {
+                if show_help {
+                    help_scroll = help_scroll.saturating_sub(1);
+                }
+            }
             events::AppEvent::Continue => {}
         }
 
@@ -176,8 +209,8 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
             true // No animation, proceed immediately
         };
 
-        // Only advance words after animation completes
-        if animation_complete && app_state.should_advance() && !app_state.advance_word() {
+        // Only advance words after animation completes and help is not shown
+        if animation_complete && !show_help && app_state.should_advance() && !app_state.advance_word() {
             break; // Reading complete
         }
 

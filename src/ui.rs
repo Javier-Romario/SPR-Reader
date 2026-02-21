@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::*,
     text::{Line, Span},
-    widgets::{LineGauge, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, LineGauge, Paragraph},
 };
 
 pub struct UIConstraints {
@@ -364,4 +364,108 @@ pub fn render_word_display(
 
     // Return progress bar area for effects
     progress_area
+}
+
+/// Renders a centered help popup overlaying the current frame.
+/// Uses `Clear` to wipe the popup region before drawing so animations
+/// remain visible around it without bleeding into the overlay.
+/// `scroll` is a raw offset from app state — it is clamped here at render
+/// time because the maximum depends on `area.height`, which is only known
+/// inside the draw closure.
+pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16) {
+    let area = frame.area();
+
+    // Popup dimensions — clamp to available terminal space
+    let popup_width = 44u16.min(area.width);
+    let popup_height = 9u16.min(area.height);
+
+    let popup_x = area.x + area.width.saturating_sub(popup_width) / 2;
+    let popup_y = area.y + area.height.saturating_sub(popup_height) / 2;
+
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    // Erase whatever is beneath the popup before drawing
+    frame.render_widget(Clear, popup_area);
+
+    // Separator fills the inner width (popup minus two border chars)
+    let sep_width = popup_width.saturating_sub(4) as usize;
+
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let header_style = Style::default()
+        .fg(Color::Gray)
+        .add_modifier(Modifier::ITALIC);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(format!("  {:<12}", "Key"), header_style),
+            Span::styled("Action", header_style),
+        ]),
+        Line::from(Span::styled(
+            format!("  {}", "─".repeat(sep_width)),
+            Style::default().fg(border_color),
+        )),
+        Line::from(vec![
+            Span::styled(format!("  {:<12}", "q / Esc"), key_style),
+            Span::raw("Quit"),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("  {:<12}", "Space"), key_style),
+            Span::raw("Pause / Resume"),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("  {:<12}", "?"), key_style),
+            Span::raw("Toggle this help"),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled("  Press ? or Esc to close", dim_style)),
+    ];
+
+    // Clamp scroll so we never show empty space below the last line.
+    // inner_height = popup height minus top and bottom border rows.
+    let total_lines = lines.len() as u16;
+    let inner_height = popup_height.saturating_sub(2);
+    let max_scroll = total_lines.saturating_sub(inner_height);
+    let effective_scroll = scroll.min(max_scroll);
+
+    // Build the border block, adding a scroll hint on the bottom border
+    // edge only when the content actually overflows the visible area.
+    let base_block = Block::default()
+        .title(Span::styled(
+            " Help ",
+            Style::default()
+                .fg(border_color)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(border_color));
+
+    let block = if max_scroll > 0 {
+        let hint = match (effective_scroll > 0, effective_scroll < max_scroll) {
+            (false, true) => " ↓ j/k ",
+            (true, true) => " ↑↓ j/k ",
+            (true, false) => " ↑ j/k ",
+            _ => "",
+        };
+        base_block.title_bottom(Line::from(Span::styled(
+            hint,
+            Style::default().fg(Color::DarkGray),
+        )))
+    } else {
+        base_block
+    };
+
+    frame.render_widget(
+        Paragraph::new(lines).scroll((effective_scroll, 0)).block(block),
+        popup_area,
+    );
 }
