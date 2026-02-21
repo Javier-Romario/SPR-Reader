@@ -235,6 +235,7 @@ pub fn render_word_display(
     border_progress: Option<f32>,
     time_ms: u64,
     progress_bar_color: Color,
+    focus_color: Color,
     enable_animations: bool,
     show_border: bool,
     show_progress_bar: bool,
@@ -302,7 +303,7 @@ pub fn render_word_display(
     let line = Line::from(vec![
         Span::raw(" ".repeat(padding_left)),
         Span::raw(&before),
-        Span::styled(&focus, Style::default().fg(Color::Red).bold()),
+        Span::styled(&focus, Style::default().fg(focus_color).bold()),
         Span::raw(&after),
     ]);
 
@@ -372,12 +373,12 @@ pub fn render_word_display(
 /// `scroll` is a raw offset from app state — it is clamped here at render
 /// time because the maximum depends on `area.height`, which is only known
 /// inside the draw closure.
-pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16) {
+pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16, seek_step: usize) {
     let area = frame.area();
 
     // Popup dimensions — clamp to available terminal space
-    let popup_width = 44u16.min(area.width);
-    let popup_height = 9u16.min(area.height);
+    let popup_width = 46u16.min(area.width);
+    let popup_height = 14u16.min(area.height);
 
     let popup_x = area.x + area.width.saturating_sub(popup_width) / 2;
     let popup_y = area.y + area.height.saturating_sub(popup_height) / 2;
@@ -405,7 +406,7 @@ pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16) {
 
     let lines = vec![
         Line::from(vec![
-            Span::styled(format!("  {:<12}", "Key"), header_style),
+            Span::styled(format!("  {:<14}", "Key"), header_style),
             Span::styled("Action", header_style),
         ]),
         Line::from(Span::styled(
@@ -413,16 +414,28 @@ pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16) {
             Style::default().fg(border_color),
         )),
         Line::from(vec![
-            Span::styled(format!("  {:<12}", "q / Esc"), key_style),
+            Span::styled(format!("  {:<14}", "q / Esc"), key_style),
             Span::raw("Quit"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {:<12}", "Space"), key_style),
+            Span::styled(format!("  {:<14}", "Space"), key_style),
             Span::raw("Pause / Resume"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {:<12}", "?"), key_style),
+            Span::styled(format!("  {:<14}", "h / ←"), key_style),
+            Span::raw(format!("Rewind {} words", seek_step)),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("  {:<14}", "l / →"), key_style),
+            Span::raw(format!("Fast-forward {} words", seek_step)),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("  {:<14}", "?"), key_style),
             Span::raw("Toggle this help"),
+        ]),
+        Line::from(vec![
+            Span::styled(format!("  {:<14}", "j / k / ↑↓"), key_style),
+            Span::raw("Scroll help"),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Press ? or Esc to close", dim_style)),

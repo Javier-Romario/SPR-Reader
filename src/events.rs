@@ -8,6 +8,8 @@ pub enum AppEvent {
     ToggleHelp,
     ScrollUp,
     ScrollDown,
+    FastForward,
+    Rewind,
     Continue,
 }
 
@@ -20,6 +22,8 @@ pub fn handle_events(timeout: Duration) -> Result<AppEvent> {
                 KeyCode::Char('?') => return Ok(AppEvent::ToggleHelp),
                 KeyCode::Char('j') | KeyCode::Down => return Ok(AppEvent::ScrollDown),
                 KeyCode::Char('k') | KeyCode::Up => return Ok(AppEvent::ScrollUp),
+                KeyCode::Char('l') | KeyCode::Right => return Ok(AppEvent::FastForward),
+                KeyCode::Char('h') | KeyCode::Left => return Ok(AppEvent::Rewind),
                 _ => {}
             }
         }

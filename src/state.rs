@@ -71,4 +71,16 @@ impl<'a> AppState<'a> {
     pub fn is_paused(&self) -> bool {
         self.paused
     }
+
+    /// Jump forward or backward by `delta` words (clamped to word bounds).
+    /// Resets the tick timer so the landed-on word gets a full display window.
+    pub fn seek_word(&mut self, delta: isize) {
+        let new_index = (self.current_word as isize + delta)
+            .max(0)
+            .min((self.words.len() as isize).saturating_sub(1)) as usize;
+        self.current_word = new_index;
+        let delay = Duration::from_secs_f64(60.0 / self.wpm as f64);
+        self.next_tick = Instant::now() + delay;
+    }
 }
+

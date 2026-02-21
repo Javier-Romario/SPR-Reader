@@ -10,6 +10,9 @@ pub struct Config {
     pub border_color: String,
     #[serde(default = "default_progress_bar_color")]
     pub progress_bar_color: String,
+    /// Focus letter color. When absent, inherits the border color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus_color: Option<String>,
     #[serde(default = "default_show_border")]
     pub show_border: bool,
     #[serde(default = "default_show_progress_bar")]
@@ -18,6 +21,8 @@ pub struct Config {
     pub enable_animations: bool,
     #[serde(default = "default_inline")]
     pub inline: bool,
+    #[serde(default = "default_seek_step")]
+    pub seek_step: usize,
 }
 
 fn default_border_color() -> String {
@@ -44,15 +49,21 @@ fn default_inline() -> bool {
     true
 }
 
+fn default_seek_step() -> usize {
+    10
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             border_color: default_border_color(),
             progress_bar_color: default_progress_bar_color(),
+            focus_color: None,
             show_border: default_show_border(),
             show_progress_bar: default_show_progress_bar(),
             enable_animations: default_enable_animations(),
             inline: default_inline(),
+            seek_step: default_seek_step(),
         }
     }
 }
@@ -123,6 +134,14 @@ impl Config {
 
     pub fn parse_progress_bar_color(&self) -> Color {
         Self::parse_color_string(&self.progress_bar_color)
+    }
+
+    /// Returns the focus letter color. Falls back to `border_color` when unset.
+    pub fn parse_focus_color(&self) -> Color {
+        match &self.focus_color {
+            Some(s) if !s.is_empty() => Self::parse_color_string(s),
+            _ => self.parse_border_color(),
+        }
     }
 
     fn parse_color_string(color_str: &str) -> Color {

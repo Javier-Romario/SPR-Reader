@@ -92,9 +92,11 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
         None
     };
     let progress_bar_color = config.parse_progress_bar_color();
+    let focus_color = config.parse_focus_color();
     let enable_animations = config.enable_animations;
     let show_border = config.show_border;
     let show_progress_bar = config.show_progress_bar;
+    let seek_step = config.seek_step as isize;
 
     // Border animation setup (only if animations are enabled)
     let border_animation_duration_ms = 600.0; // 0.6 seconds for full animation
@@ -147,6 +149,7 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
                 border_progress,
                 time_ms,
                 progress_bar_color,
+                focus_color,
                 enable_animations,
                 show_border,
                 show_progress_bar,
@@ -166,7 +169,7 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
 
             // Render help popup on top of everything else
             if show_help {
-                ui::render_help_popup(f, help_border_color, help_scroll);
+                ui::render_help_popup(f, help_border_color, help_scroll, config.seek_step);
             }
         })?;
 
@@ -196,6 +199,16 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
             events::AppEvent::ScrollUp => {
                 if show_help {
                     help_scroll = help_scroll.saturating_sub(1);
+                }
+            }
+            events::AppEvent::FastForward => {
+                if !show_help {
+                    app_state.seek_word(seek_step);
+                }
+            }
+            events::AppEvent::Rewind => {
+                if !show_help {
+                    app_state.seek_word(-seek_step);
                 }
             }
             events::AppEvent::Continue => {}
