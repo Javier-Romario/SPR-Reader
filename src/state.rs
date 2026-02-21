@@ -72,6 +72,12 @@ impl<'a> AppState<'a> {
         self.paused
     }
 
+    /// Returns up to `count` words following the current word.
+    pub fn peek_words(&self, count: usize) -> Vec<&str> {
+        let start = self.current_word + 1;
+        self.words[start..].iter().take(count).copied().collect()
+    }
+
     /// Jump forward or backward by `delta` words (clamped to word bounds).
     /// Resets the tick timer so the landed-on word gets a full display window.
     pub fn seek_word(&mut self, delta: isize) {

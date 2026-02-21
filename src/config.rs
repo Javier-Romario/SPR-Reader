@@ -23,6 +23,9 @@ pub struct Config {
     pub inline: bool,
     #[serde(default = "default_seek_step")]
     pub seek_step: usize,
+    /// Number of upcoming words to preview below the current word (0 = disabled).
+    #[serde(default = "default_preview_words")]
+    pub preview_words: usize,
 }
 
 fn default_border_color() -> String {
@@ -53,6 +56,10 @@ fn default_seek_step() -> usize {
     10
 }
 
+fn default_preview_words() -> usize {
+    0
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -64,6 +71,7 @@ impl Default for Config {
             enable_animations: default_enable_animations(),
             inline: default_inline(),
             seek_step: default_seek_step(),
+            preview_words: default_preview_words(),
         }
     }
 }

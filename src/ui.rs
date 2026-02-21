@@ -7,26 +7,19 @@ use ratatui::{
 };
 
 pub struct UIConstraints {
-    pub constraints: [Constraint; 4],
+    pub constraints: Vec<Constraint>,
 }
 
 impl UIConstraints {
-    pub fn new(is_inline: bool) -> Self {
-        let constraints = if !is_inline {
-            [
-                Constraint::Percentage(50),
-                Constraint::Min(1),
-                Constraint::Length(2),
-                Constraint::Percentage(50),
-            ]
-        } else {
-            [
-                Constraint::Percentage(10),
-                Constraint::Min(1),
-                Constraint::Length(2),
-                Constraint::Percentage(10),
-            ]
-        };
+    pub fn new(is_inline: bool, _preview_count: usize) -> Self {
+        let (top_pct, bot_pct): (u16, u16) = if !is_inline { (50, 50) } else { (10, 10) };
+
+        let constraints = vec![
+            Constraint::Percentage(top_pct),
+            Constraint::Min(1), // word line
+            Constraint::Length(2), // progress bar
+            Constraint::Percentage(bot_pct),
+        ];
 
         Self { constraints }
     }
@@ -226,6 +219,7 @@ fn find_focus_point(word: &str) -> usize {
 pub fn render_word_display(
     frame: &mut Frame,
     word: &str,
+    preview_words: &[&str],
     current_word: usize,
     total_words: usize,
     is_paused: bool,
@@ -276,7 +270,7 @@ pub fn render_word_display(
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(constraints.constraints)
+        .constraints(constraints.constraints.clone())
         .split(inner_area);
 
     let focus_idx = find_focus_point(word);
@@ -299,18 +293,24 @@ pub fn render_word_display(
         0
     };
 
-    // Build the line with styled spans
-    let line = Line::from(vec![
+    // Build the line: current word + preview words appended inline
+    let dim_style = Style::default().fg(Color::DarkGray);
+    let mut spans = vec![
         Span::raw(" ".repeat(padding_left)),
         Span::raw(&before),
         Span::styled(&focus, Style::default().fg(focus_color).bold()),
         Span::raw(&after),
-    ]);
+    ];
+    for &preview_word in preview_words.iter() {
+        spans.push(Span::styled(format!(" {}", preview_word), dim_style));
+    }
+    let line = Line::from(spans);
 
     let paragraph = Paragraph::new(line).alignment(Alignment::Left);
     frame.render_widget(paragraph, chunks[1]);
 
     // Render progress bar if enabled
+    let progress_chunk_idx = 2;
     let progress_area = if show_progress_bar {
         let progress = (current_word + 1) as f64 / total_words as f64;
 
@@ -356,8 +356,8 @@ pub fn render_word_display(
             .ratio(progress)
             .label(progress_label);
 
-        frame.render_widget(progress_bar, chunks[2]);
-        chunks[2]
+        frame.render_widget(progress_bar, chunks[progress_chunk_idx]);
+        chunks[progress_chunk_idx]
     } else {
         // Return empty area if progress bar is disabled
         Rect::default()

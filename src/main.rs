@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
     let mut terminal = tui::init(is_inline)?;
 
-    app::run(&content, args.wpm, is_inline, &mut terminal)?;
+    app::run(&content, args.wpm, is_inline, args.preview_words, &mut terminal)?;
 
     tui::restore(is_inline, &mut terminal)?;
 

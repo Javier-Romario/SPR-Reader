@@ -75,14 +75,16 @@ fn brighten_color(color: Color) -> Color {
     }
 }
 
-pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Result<()> {
+pub fn run(content: &str, wpm: u64, is_inline: bool, preview_words: Option<usize>, terminal: &mut Tui) -> Result<()> {
     let mut last_frame = Instant::now();
     let mut effects: EffectManager<()> = EffectManager::default();
     let mut app_state = AppState::new(content, wpm);
-    let ui_constraints = ui::UIConstraints::new(is_inline);
 
     // Load config
     let config = Config::load()?;
+    let preview_count = preview_words.unwrap_or(config.preview_words);
+
+    let ui_constraints = ui::UIConstraints::new(is_inline, preview_count);
     let is_first_use = Config::is_first_use()?;
 
     // Extract config values
@@ -137,9 +139,11 @@ pub fn run(content: &str, wpm: u64, is_inline: bool, terminal: &mut Tui) -> Resu
             };
 
             // Render UI and get progress bar area for effects
+            let preview = app_state.peek_words(preview_count);
             let progress_area = ui::render_word_display(
                 f,
                 app_state.current_word().unwrap_or(""),
+                &preview,
                 app_state.current_word_index(),
                 app_state.total_words(),
                 app_state.is_paused(),

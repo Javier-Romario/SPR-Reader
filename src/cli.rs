@@ -17,6 +17,10 @@ pub struct Args {
     #[arg(long, default_value = "300")]
     pub wpm: u64,
 
+    /// Number of upcoming words to preview below the current word
+    #[arg(short = 'p', long)]
+    pub preview_words: Option<usize>,
+
     /// Inline mode (defaults to config value if not specified)
     #[arg(
         short,
