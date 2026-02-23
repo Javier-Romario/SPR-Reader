@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 1. Build pre-compiled binaries for common targets ──────────────────────
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: spr-macos-arm64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact: spr-macos-x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: spr-linux-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.artifact }}.tar.gz spr
+          cd ../../..
+          sha256sum ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.tar.gz.sha256
+
+  # ── 2. Create the GitHub Release and attach binaries ───────────────────────
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: artifacts/**/*.tar.gz
+
+  # ── 3. Update Formula/spr.rb with the correct SHA256 ───────────────────────
+  update-formula:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute source tarball SHA256
+        id: sha
+        run: |
+          TAG="${{ github.ref_name }}"
+          URL="https://github.com/Javier-Romario/SPR-Reader/archive/refs/tags/${TAG}.tar.gz"
+          # GitHub may take a moment to publish the tarball — retry up to 5 times
+          for i in $(seq 1 5); do
+            curl -fsSL "$URL" -o source.tar.gz && break
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          SHA256=$(sha256sum source.tar.gz | awk '{print $1}')
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+          echo "url=${URL}"       >> "$GITHUB_OUTPUT"
+          echo "Computed SHA256: ${SHA256}"
+
+      - name: Patch Formula/spr.rb
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          sed -i \
+            -e "s|url \".*\"|url \"${{ steps.sha.outputs.url }}\"|" \
+            -e "s|sha256 \".*\"|sha256 \"${{ steps.sha.outputs.sha256 }}\"|" \
+            Formula/spr.rb
+
+      - name: Commit updated formula
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/spr.rb
+          git diff --staged --quiet || \
+            git commit -m "chore: update formula sha256 for ${{ github.ref_name }}"
+          git push origin HEAD:main
