@@ -1,15 +1,23 @@
 # SPR
 
-Concentration has never been my strong point, that being said; programming requires concentration and reading, 
-and I am a programmer, so why not create tooling which aides me in my work and makes my life easier.
+A terminal speed-reader using the Spritz ORP technique — one focused word at a time, right in your shell.
 
-That is how SPR came about, influenced by [Stutter](), [Ratatui and Orhun's amazing work]() 
-along with the likes of [TJ De'vries]() and [Neovim]() workflows.
-The idea is that we need to read **a lot**, why not make it easier to do so on the command line.
+Influenced by [ratatui](https://github.com/ratatui/ratatui), [TJ DeVries](https://github.com/tjdevries), and the [Neovim](https://neovim.io) workflow ethos: read more, read faster, stay in the terminal.
 
 <div align="center">
   <img src="demo.gif" alt="SPR demo" />
 </div>
+
+## Features
+
+- Speed reading at configurable WPM
+- Focus point highlighting (Spritz ORP)
+- Inline (5-line) and fullscreen modes
+- Word preview — upcoming words shown dimly below the current
+- Visual progress bar with fast-forward / rewind navigation
+- Customizable colors and animations via TOML config
+
+---
 
 ## Installation
 
@@ -20,7 +28,7 @@ brew tap Javier-Romario/SPR-Reader https://github.com/Javier-Romario/SPR-Reader
 brew install spr
 ```
 
-### Nix (NixOS / nix-darwin / any Linux with Nix)
+### Nix
 
 Run without installing:
 
@@ -34,7 +42,7 @@ Install into your profile:
 nix profile install github:Javier-Romario/SPR-Reader
 ```
 
-Or add to your NixOS / home-manager flake:
+Add to a NixOS / home-manager flake:
 
 ```nix
 inputs.spr.url = "github:Javier-Romario/SPR-Reader";
@@ -43,7 +51,7 @@ inputs.spr.url = "github:Javier-Romario/SPR-Reader";
 inputs.spr.packages.${system}.default
 ```
 
-### From source (requires Rust)
+### From source
 
 ```bash
 cargo install --git https://github.com/Javier-Romario/SPR-Reader
@@ -60,15 +68,15 @@ spr --file notes.txt --wpm 450 --inline
 spr --file article.txt --preview-words 3
 ```
 
-### CLI Flags
+### Flags
 
 | Flag | Short | Default | Description |
-|---|---|---|---|
+|:-----|:-----:|:-------:|:------------|
 | `--text <TEXT>` | `-t` | — | Text string to read |
-| `--file <FILE>` | `-f` | — | Path to a text file to read |
-| `--wpm <N>` | | `300` | Reading speed in words per minute |
-| `--inline [bool]` | `-i` | config value | Inline mode (5-line viewport). Omit value for `true` |
-| `--preview-words <N>` | `-p` | config value | Upcoming words shown dimly below current word |
+| `--file <FILE>` | `-f` | — | Path to a text file |
+| `--wpm <N>` | | `300` | Reading speed (words per minute) |
+| `--inline` | `-i` | config | Compact 5-line viewport. Flag alone sets `true` |
+| `--preview-words <N>` | `-p` | config | Upcoming words shown below current |
 
 `--text` and `--file` are mutually exclusive. One must be provided.
 
@@ -76,31 +84,27 @@ spr --file article.txt --preview-words 3
 
 ## Configuration
 
-SPR creates a config file on first run at `~/.config/SPR-Reader/config.toml`.
-
-### Config File Options
+Config is created on first run at `~/.config/SPR-Reader/config.toml`.
 
 | Key | Type | Default | Description |
-|---|---|---|---|
-| `border_color` | string | `"60,100,100"` | Color of the UI border |
-| `progress_bar_color` | string | `"60,100,100"` | Color of the progress bar |
-| `focus_color` | string | *(inherits `border_color`)* | Color of the Spritz focus letter. Omit to match the border |
-| `show_border` | bool | `true` | Show or hide the UI border |
-| `show_progress_bar` | bool | `true` | Show or hide the progress bar |
+|:----|:----:|:-------:|:------------|
+| `border_color` | string | `"60,100,100"` | UI border color |
+| `progress_bar_color` | string | `"60,100,100"` | Progress bar color |
+| `focus_color` | string | *(inherits `border_color`)* | Spritz focus letter color |
+| `show_border` | bool | `true` | Show/hide the UI border |
+| `show_progress_bar` | bool | `true` | Show/hide the progress bar |
 | `enable_animations` | bool | `true` | Enable tachyonfx transition animations |
-| `inline` | bool | `true` | `true` = compact 5-line viewport, `false` = fullscreen |
-| `seek_step` | integer | `10` | Number of words to jump when rewinding or fast-forwarding |
-| `preview_words` | integer | `0` | Upcoming words to display dimly below the current word |
+| `inline` | bool | `true` | `true` = compact 5-line view, `false` = fullscreen |
+| `seek_step` | integer | `10` | Words to jump per fast-forward / rewind |
+| `preview_words` | integer | `0` | Upcoming words to preview below current (`0` = off) |
 
-### Color Formats
+### Color formats
 
-All color fields accept any of the following formats:
-
-| Format | Example | Notes |
-|---|---|---|
-| Named color | `"cyan"` | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `gray`, `darkgray`, `white`, and their `light*` variants |
-| Hex RGB | `"#3c6464"` | Standard 6-digit hex |
-| Decimal RGB | `"60,100,100"` | Comma-separated R,G,B values (0–255) |
+| Format | Example |
+|:-------|:--------|
+| Named | `"cyan"`, `"lightcyan"`, `"darkgray"`, … |
+| Hex | `"#3c6464"` |
+| Decimal RGB | `"60,100,100"` |
 
 ### Example `config.toml`
 
@@ -116,14 +120,14 @@ seek_step          = 10
 preview_words      = 2
 ```
 
-CLI flags `--inline` and `--preview-words` override the config file values for that invocation.
+CLI flags `--inline` and `--preview-words` override config for that invocation.
 
 ---
 
 ## Keybindings
 
 | Key | Action |
-|---|---|
+|:----|:-------|
 | `Space` | Pause / Resume |
 | `l` / `→` | Fast-forward (`seek_step` words) |
 | `h` / `←` | Rewind (`seek_step` words) |
@@ -131,15 +135,3 @@ CLI flags `--inline` and `--preview-words` override the config file values for t
 | `k` / `↑` | Scroll help up |
 | `?` | Toggle help overlay |
 | `q` / `Esc` | Quit |
-
----
-
-**Key Features:**
-
-- 📖 Speed reading with configurable WPM
-- 🎯 Focus point highlighting (Spritz algorithm)
-- 🖥️ Dual modes: fullscreen and inline (5-line viewport)
-- 📊 Visual progress tracking
-- ⏸️ Interactive pause/resume controls
-- 🎨 Customizable colors and animations
-- ⚙️ TOML-based configuration system
