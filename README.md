@@ -7,6 +7,10 @@ That is how SPR came about, influenced by [Stutter](), [Ratatui and Orhun's amaz
 along with the likes of [TJ De'vries]() and [Neovim]() workflows.
 The idea is that we need to read **a lot**, why not make it easier to do so on the command line.
 
+<div align="center">
+  <img src="demo.gif" alt="SPR demo" />
+</div>
+
 ## Installation
 
 ### Homebrew (macOS / Linux)
