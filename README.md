@@ -1,4 +1,10 @@
-# SPR
+<div align="center">
+<pre>
+┏━┓┏━┓┏━┓   ┏━┓┏━╸┏━┓╺┳┓┏━╸┏━┓
+┗━┓┣━┛┣┳┛   ┣┳┛┣╸ ┣━┫ ┃┃┣╸ ┣┳┛
+┗━┛╹  ╹┗╸   ╹┗╸┗━╸╹ ╹╺┻┛┗━╸╹┗╸
+</pre>
+</div>
 
 A terminal speed-reader using the Spritz ORP technique — one focused word at a time, right in your shell.
 
