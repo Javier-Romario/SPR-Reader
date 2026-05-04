@@ -192,3 +192,195 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::style::Color;
+
+    // --- defaults ---
+
+    #[test]
+    fn default_config_values() {
+        let c = Config::default();
+        assert_eq!(c.border_color, "60,100,100");
+        assert_eq!(c.progress_bar_color, "60,100,100");
+        assert!(c.focus_color.is_none());
+        assert!(c.show_border);
+        assert!(c.show_progress_bar);
+        assert!(c.enable_animations);
+        assert!(c.inline);
+        assert_eq!(c.seek_step, 10);
+        assert_eq!(c.preview_words, 0);
+    }
+
+    // --- parse_color_string: named ---
+
+    #[test]
+    fn parse_named_colors() {
+        assert_eq!(Config::parse_color_string("cyan"), Color::Cyan);
+        assert_eq!(Config::parse_color_string("red"), Color::Red);
+        assert_eq!(Config::parse_color_string("green"), Color::Green);
+        assert_eq!(Config::parse_color_string("blue"), Color::Blue);
+        assert_eq!(Config::parse_color_string("black"), Color::Black);
+        assert_eq!(Config::parse_color_string("white"), Color::White);
+        assert_eq!(Config::parse_color_string("gray"), Color::Gray);
+        assert_eq!(Config::parse_color_string("darkgray"), Color::DarkGray);
+        assert_eq!(Config::parse_color_string("lightcyan"), Color::LightCyan);
+        assert_eq!(Config::parse_color_string("lightblue"), Color::LightBlue);
+    }
+
+    #[test]
+    fn parse_named_colors_case_insensitive() {
+        assert_eq!(Config::parse_color_string("CYAN"), Color::Cyan);
+        assert_eq!(Config::parse_color_string("Red"), Color::Red);
+        assert_eq!(Config::parse_color_string("LightBlue"), Color::LightBlue);
+        assert_eq!(Config::parse_color_string("DARKGRAY"), Color::DarkGray);
+    }
+
+    // --- parse_color_string: hex ---
+
+    #[test]
+    fn parse_hex_primary_colors() {
+        assert_eq!(Config::parse_color_string("#ff0000"), Color::Rgb(255, 0, 0));
+        assert_eq!(Config::parse_color_string("#00ff00"), Color::Rgb(0, 255, 0));
+        assert_eq!(Config::parse_color_string("#0000ff"), Color::Rgb(0, 0, 255));
+    }
+
+    #[test]
+    fn parse_hex_default_color() {
+        assert_eq!(Config::parse_color_string("#3c6464"), Color::Rgb(60, 100, 100));
+    }
+
+    #[test]
+    fn parse_hex_black_and_white() {
+        assert_eq!(Config::parse_color_string("#000000"), Color::Rgb(0, 0, 0));
+        assert_eq!(Config::parse_color_string("#ffffff"), Color::Rgb(255, 255, 255));
+    }
+
+    #[test]
+    fn parse_hex_invalid_chars_fall_back_to_zero_components() {
+        // invalid hex chars → unwrap_or(0) per component
+        assert_eq!(Config::parse_color_string("#xxyyzz"), Color::Rgb(0, 0, 0));
+    }
+
+    #[test]
+    fn parse_hex_wrong_length_falls_back() {
+        assert_eq!(Config::parse_color_string("#fff"), Color::Cyan);    // 4 chars
+        assert_eq!(Config::parse_color_string("#ffffffff"), Color::Cyan); // 9 chars
+    }
+
+    // --- parse_color_string: decimal RGB ---
+
+    #[test]
+    fn parse_rgb_decimal() {
+        assert_eq!(Config::parse_color_string("255,0,0"), Color::Rgb(255, 0, 0));
+        assert_eq!(Config::parse_color_string("60,100,100"), Color::Rgb(60, 100, 100));
+        assert_eq!(Config::parse_color_string("0,0,0"), Color::Rgb(0, 0, 0));
+    }
+
+    #[test]
+    fn parse_rgb_decimal_with_spaces() {
+        assert_eq!(Config::parse_color_string("255, 0, 0"), Color::Rgb(255, 0, 0));
+        assert_eq!(Config::parse_color_string(" 60 , 100 , 100 "), Color::Rgb(60, 100, 100));
+    }
+
+    #[test]
+    fn parse_rgb_wrong_part_count_falls_back() {
+        assert_eq!(Config::parse_color_string("1,2"), Color::Cyan);       // 2 parts
+        assert_eq!(Config::parse_color_string("1,2,3,4"), Color::Cyan);   // 4 parts
+    }
+
+    // --- parse_color_string: fallback ---
+
+    #[test]
+    fn parse_unknown_string_falls_back_to_cyan() {
+        assert_eq!(Config::parse_color_string("notacolor"), Color::Cyan);
+        assert_eq!(Config::parse_color_string(""), Color::Cyan);
+        assert_eq!(Config::parse_color_string("42"), Color::Cyan);
+    }
+
+    // --- parse_border_color / parse_progress_bar_color ---
+
+    #[test]
+    fn parse_border_color_delegates_to_parse_color_string() {
+        let mut c = Config::default();
+        c.border_color = "#ff0000".to_string();
+        assert_eq!(c.parse_border_color(), Color::Rgb(255, 0, 0));
+    }
+
+    #[test]
+    fn parse_progress_bar_color_delegates() {
+        let mut c = Config::default();
+        c.progress_bar_color = "green".to_string();
+        assert_eq!(c.parse_progress_bar_color(), Color::Green);
+    }
+
+    // --- parse_focus_color fallback ---
+
+    #[test]
+    fn focus_color_absent_falls_back_to_border() {
+        let mut c = Config::default();
+        c.border_color = "red".to_string();
+        c.focus_color = None;
+        assert_eq!(c.parse_focus_color(), Color::Red);
+    }
+
+    #[test]
+    fn focus_color_empty_string_falls_back_to_border() {
+        let mut c = Config::default();
+        c.border_color = "red".to_string();
+        c.focus_color = Some("".to_string());
+        assert_eq!(c.parse_focus_color(), Color::Red);
+    }
+
+    #[test]
+    fn focus_color_explicit_overrides_border() {
+        let mut c = Config::default();
+        c.border_color = "red".to_string();
+        c.focus_color = Some("blue".to_string());
+        assert_eq!(c.parse_focus_color(), Color::Blue);
+    }
+
+    // --- TOML round-trip ---
+
+    #[test]
+    fn config_toml_round_trip() {
+        let original = Config {
+            border_color: "#ff0000".to_string(),
+            progress_bar_color: "cyan".to_string(),
+            focus_color: Some("lightgreen".to_string()),
+            show_border: false,
+            show_progress_bar: false,
+            enable_animations: false,
+            inline: false,
+            seek_step: 5,
+            preview_words: 3,
+        };
+        let toml_str = toml::to_string_pretty(&original).unwrap();
+        let deserialized: Config = toml::from_str(&toml_str).unwrap();
+        assert_eq!(deserialized.border_color, "#ff0000");
+        assert_eq!(deserialized.focus_color, Some("lightgreen".to_string()));
+        assert!(!deserialized.show_border);
+        assert_eq!(deserialized.seek_step, 5);
+        assert_eq!(deserialized.preview_words, 3);
+    }
+
+    #[test]
+    fn config_toml_partial_uses_defaults() {
+        let config: Config = toml::from_str(r#"border_color = "green""#).unwrap();
+        assert_eq!(config.border_color, "green");
+        assert_eq!(config.progress_bar_color, "60,100,100");
+        assert!(config.show_border);
+        assert_eq!(config.seek_step, 10);
+        assert_eq!(config.preview_words, 0);
+    }
+
+    #[test]
+    fn config_toml_empty_uses_all_defaults() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.border_color, "60,100,100");
+        assert!(config.inline);
+        assert!(config.enable_animations);
+    }
+}

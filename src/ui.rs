@@ -11,7 +11,10 @@ pub struct UIConstraints {
 }
 
 impl UIConstraints {
-    pub fn new(is_inline: bool, _preview_count: usize) -> Self {
+    pub fn new(
+        is_inline: bool,
+        _preview_count: usize,
+    ) -> Self {
         let (top_pct, bot_pct): (u16, u16) = if !is_inline { (50, 50) } else { (10, 10) };
 
         let constraints = vec![
@@ -27,7 +30,12 @@ impl UIConstraints {
 
 /// Draws a border progressively with cyberpunk effects (0.0 to 1.0)
 /// Sequence: left verticals -> top/bottom verticals -> corners (with flash) -> horizontals (with glow trail)
-fn draw_progressive_border(buf: &mut Buffer, area: Rect, progress: f32, color: Color) {
+fn draw_progressive_border(
+    buf: &mut Buffer,
+    area: Rect,
+    progress: f32,
+    color: Color,
+) {
     if area.width < 2 || area.height < 2 {
         return;
     }
@@ -365,6 +373,89 @@ pub fn render_word_display(
 
     // Return progress bar area for effects
     progress_area
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- find_focus_point ---
+
+    #[test]
+    fn focus_point_single_char() {
+        assert_eq!(find_focus_point("a"), 0);
+    }
+
+    #[test]
+    fn focus_point_two_to_five_chars() {
+        assert_eq!(find_focus_point("ab"), 1);
+        assert_eq!(find_focus_point("abc"), 1);
+        assert_eq!(find_focus_point("hello"), 1); // 5 chars
+    }
+
+    #[test]
+    fn focus_point_six_to_nine_chars() {
+        assert_eq!(find_focus_point("foobar"), 2); // 6 chars
+        assert_eq!(find_focus_point("something"), 2); // 9 chars
+    }
+
+    #[test]
+    fn focus_point_ten_to_thirteen_chars() {
+        assert_eq!(find_focus_point("abcdefghij"), 3); // 10 chars
+        assert_eq!(find_focus_point("abcdefghijklm"), 3); // 13 chars
+    }
+
+    #[test]
+    fn focus_point_fourteen_plus_chars() {
+        assert_eq!(find_focus_point("abcdefghijklmn"), 4); // 14 chars
+        assert_eq!(find_focus_point("abcdefghijklmnopqrstuvwxyz"), 4); // 26 chars
+    }
+
+    #[test]
+    fn focus_point_counts_unicode_chars_not_bytes() {
+        // "café" = 4 chars (c, a, f, é) → bucket 2..=5 → 1
+        assert_eq!(find_focus_point("café"), 1);
+        // "naïveté" = 7 chars → bucket 6..=9 → 2
+        assert_eq!(find_focus_point("naïveté"), 2);
+    }
+
+    // --- UIConstraints ---
+
+    #[test]
+    fn ui_constraints_inline_has_four_rows() {
+        let ui = UIConstraints::new(true, 0);
+        assert_eq!(ui.constraints.len(), 4);
+    }
+
+    #[test]
+    fn ui_constraints_fullscreen_has_four_rows() {
+        let ui = UIConstraints::new(false, 0);
+        assert_eq!(ui.constraints.len(), 4);
+    }
+
+    #[test]
+    fn ui_constraints_preview_count_does_not_change_row_count() {
+        // Preview words are rendered inline; they don't add extra layout rows
+        let ui_zero = UIConstraints::new(true, 0);
+        let ui_five = UIConstraints::new(true, 5);
+        assert_eq!(ui_zero.constraints.len(), ui_five.constraints.len());
+    }
+
+    #[test]
+    fn ui_constraints_inline_uses_small_padding() {
+        use ratatui::layout::Constraint;
+        let ui = UIConstraints::new(true, 0);
+        assert!(matches!(ui.constraints[0], Constraint::Percentage(10)));
+        assert!(matches!(ui.constraints[3], Constraint::Percentage(10)));
+    }
+
+    #[test]
+    fn ui_constraints_fullscreen_uses_fifty_percent_padding() {
+        use ratatui::layout::Constraint;
+        let ui = UIConstraints::new(false, 0);
+        assert!(matches!(ui.constraints[0], Constraint::Percentage(50)));
+        assert!(matches!(ui.constraints[3], Constraint::Percentage(50)));
+    }
 }
 
 /// Renders a centered help popup overlaying the current frame.

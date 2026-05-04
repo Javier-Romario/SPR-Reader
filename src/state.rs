@@ -90,3 +90,192 @@ impl<'a> AppState<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_state(content: &str) -> AppState<'_> {
+        AppState::new(content, 300)
+    }
+
+    // --- construction ---
+
+    #[test]
+    fn new_splits_by_whitespace() {
+        assert_eq!(make_state("one two three").total_words(), 3);
+    }
+
+    #[test]
+    fn new_collapses_extra_whitespace() {
+        assert_eq!(make_state("  one   two  ").total_words(), 2);
+    }
+
+    #[test]
+    fn new_single_word() {
+        assert_eq!(make_state("only").total_words(), 1);
+    }
+
+    // --- current_word ---
+
+    #[test]
+    fn current_word_starts_at_first() {
+        assert_eq!(make_state("hello world").current_word(), Some("hello"));
+    }
+
+    #[test]
+    fn current_word_index_starts_at_zero() {
+        assert_eq!(make_state("a b c").current_word_index(), 0);
+    }
+
+    // --- advance_word ---
+
+    #[test]
+    fn advance_word_moves_to_next() {
+        let mut state = make_state("one two three");
+        assert!(state.advance_word());
+        assert_eq!(state.current_word(), Some("two"));
+    }
+
+    #[test]
+    fn advance_word_returns_false_when_past_last() {
+        let mut state = make_state("only");
+        assert!(!state.advance_word());
+    }
+
+    #[test]
+    fn advance_word_through_all_words() {
+        let mut state = make_state("a b c");
+        assert!(state.advance_word()); // -> b
+        assert!(state.advance_word()); // -> c
+        assert!(!state.advance_word()); // past end
+    }
+
+    #[test]
+    fn advance_word_updates_index() {
+        let mut state = make_state("a b c");
+        state.advance_word();
+        assert_eq!(state.current_word_index(), 1);
+        state.advance_word();
+        assert_eq!(state.current_word_index(), 2);
+    }
+
+    // --- toggle_pause ---
+
+    #[test]
+    fn starts_unpaused() {
+        assert!(!make_state("hello").is_paused());
+    }
+
+    #[test]
+    fn toggle_pause_toggles() {
+        let mut state = make_state("hello");
+        state.toggle_pause();
+        assert!(state.is_paused());
+        state.toggle_pause();
+        assert!(!state.is_paused());
+    }
+
+    #[test]
+    fn should_advance_is_false_when_paused() {
+        let mut state = make_state("hello world");
+        state.toggle_pause();
+        assert!(!state.should_advance());
+    }
+
+    // --- seek_word ---
+
+    #[test]
+    fn seek_forward() {
+        let mut state = make_state("a b c d e");
+        state.seek_word(3);
+        assert_eq!(state.current_word_index(), 3);
+        assert_eq!(state.current_word(), Some("d"));
+    }
+
+    #[test]
+    fn seek_backward() {
+        let mut state = make_state("a b c d e");
+        state.seek_word(4); // -> e
+        state.seek_word(-2); // -> c
+        assert_eq!(state.current_word_index(), 2);
+        assert_eq!(state.current_word(), Some("c"));
+    }
+
+    #[test]
+    fn seek_clamps_at_start() {
+        let mut state = make_state("a b c");
+        state.seek_word(-100);
+        assert_eq!(state.current_word_index(), 0);
+        assert_eq!(state.current_word(), Some("a"));
+    }
+
+    #[test]
+    fn seek_clamps_at_end() {
+        let mut state = make_state("a b c");
+        state.seek_word(100);
+        assert_eq!(state.current_word_index(), 2);
+        assert_eq!(state.current_word(), Some("c"));
+    }
+
+    #[test]
+    fn seek_zero_delta_is_noop() {
+        let mut state = make_state("a b c");
+        state.seek_word(1);
+        state.seek_word(0);
+        assert_eq!(state.current_word_index(), 1);
+    }
+
+    // --- peek_words ---
+
+    #[test]
+    fn peek_words_returns_upcoming() {
+        let state = make_state("one two three four");
+        assert_eq!(state.peek_words(2), vec!["two", "three"]);
+    }
+
+    #[test]
+    fn peek_words_zero_count_is_empty() {
+        assert!(make_state("one two three").peek_words(0).is_empty());
+    }
+
+    #[test]
+    fn peek_words_count_exceeds_remaining() {
+        let state = make_state("one two three");
+        assert_eq!(state.peek_words(10), vec!["two", "three"]);
+    }
+
+    #[test]
+    fn peek_words_at_last_word_is_empty() {
+        let mut state = make_state("one two");
+        state.seek_word(1); // at "two"
+        assert!(state.peek_words(3).is_empty());
+    }
+
+    // --- wpm / timing ---
+
+    #[test]
+    fn wpm_300_delay_is_200ms() {
+        // 60 / 300 = 0.2 seconds = 200ms
+        let state = AppState::new("hello", 300);
+        let timeout = state.get_timeout();
+        // timeout should be ~200ms (allow ±50ms for test overhead)
+        assert!(timeout.as_millis() <= 250);
+    }
+
+    #[test]
+    fn sentence_ending_punctuation_adds_delay() {
+        // get_timeout adds 500ms for sentence-ending punctuation
+        let state = AppState::new("Hello.", 300);
+        let timeout = state.get_timeout();
+        // Base ~200ms + 500ms punctuation = ~700ms
+        assert!(timeout.as_millis() >= 450);
+    }
+
+    #[test]
+    fn non_sentence_punctuation_no_extra_delay() {
+        let state = AppState::new("hello,", 300);
+        let timeout = state.get_timeout();
+        assert!(timeout.as_millis() <= 250);
+    }
+}
+

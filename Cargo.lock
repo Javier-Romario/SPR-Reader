@@ -816,6 +816,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "crossterm",
+ "libc",
  "ratatui",
  "serde",
  "tachyonfx",

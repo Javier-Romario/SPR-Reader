@@ -72,6 +72,12 @@ spr --text "Your text here"
 spr --file path/to/file.txt
 spr --file notes.txt --wpm 450 --inline
 spr --file article.txt --preview-words 3
+
+# Piped stdin
+echo "The quick brown fox" | spr
+cat article.txt | spr --wpm 500
+pbpaste | spr --inline
+curl -s https://example.com/article.txt | spr
 ```
 
 ### Flags
@@ -84,7 +90,7 @@ spr --file article.txt --preview-words 3
 | `--inline` | `-i` | config | Compact 5-line viewport. Flag alone sets `true` |
 | `--preview-words <N>` | `-p` | config | Upcoming words shown below current |
 
-`--text` and `--file` are mutually exclusive. One must be provided.
+`--text` and `--file` are mutually exclusive. If neither is given, `spr` reads from stdin.
 
 ---
 
