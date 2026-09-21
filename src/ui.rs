@@ -1,3 +1,4 @@
+use crate::state::AppState;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -5,21 +6,31 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, LineGauge, Paragraph},
 };
+use unicode_width::UnicodeWidthStr;
+
+/// Theme / layout settings bundled together so `render_word_display` doesn't
+/// need a dozen positional arguments.
+pub struct RenderOptions {
+    pub preview_count: usize,
+    pub border_color: Option<Color>,
+    pub progress_bar_color: Color,
+    pub focus_color: Color,
+    pub enable_animations: bool,
+    pub show_border: bool,
+    pub show_progress_bar: bool,
+}
 
 pub struct UIConstraints {
     pub constraints: Vec<Constraint>,
 }
 
 impl UIConstraints {
-    pub fn new(
-        is_inline: bool,
-        _preview_count: usize,
-    ) -> Self {
+    pub fn new(is_inline: bool) -> Self {
         let (top_pct, bot_pct): (u16, u16) = if !is_inline { (50, 50) } else { (10, 10) };
 
         let constraints = vec![
             Constraint::Percentage(top_pct),
-            Constraint::Min(1), // word line
+            Constraint::Min(1),    // word line
             Constraint::Length(2), // progress bar
             Constraint::Percentage(bot_pct),
         ];
@@ -30,12 +41,7 @@ impl UIConstraints {
 
 /// Draws a border progressively with cyberpunk effects (0.0 to 1.0)
 /// Sequence: left verticals -> top/bottom verticals -> corners (with flash) -> horizontals (with glow trail)
-fn draw_progressive_border(
-    buf: &mut Buffer,
-    area: Rect,
-    progress: f32,
-    color: Color,
-) {
+fn draw_progressive_border(buf: &mut Buffer, area: Rect, progress: f32, color: Color) {
     if area.width < 2 || area.height < 2 {
         return;
     }
@@ -97,7 +103,7 @@ fn draw_progressive_border(
             let distance_from_head = chars_to_draw.saturating_sub(i);
             let line_color = if distance_from_head == 0 {
                 // Only the drawing head gets subtle brightening
-                brighten_color_ui(color)
+                brighten_color(color)
             } else {
                 color
             };
@@ -142,14 +148,15 @@ fn draw_border_scanner(buf: &mut Buffer, area: Rect, time_ms: u64, color: Color)
     // Helper to check if we should glow at this position (subtle)
     let should_glow = |p: u16| -> Option<Color> {
         let dist = if p > current_position {
-            p.saturating_sub(current_position).min(current_position + perimeter as u16 - p)
+            p.saturating_sub(current_position)
+                .min(current_position + perimeter as u16 - p)
         } else {
             current_position.saturating_sub(p)
         };
 
         match dist {
-            0 => Some(brighten_color_ui(color)), // Scanner head (subtle)
-            _ => None,                            // No glow trail
+            0 => Some(brighten_color(color)), // Scanner head (subtle)
+            _ => None,                        // No glow trail
         }
     };
 
@@ -186,8 +193,9 @@ fn draw_border_scanner(buf: &mut Buffer, area: Rect, time_ms: u64, color: Color)
     }
 }
 
-/// Brightens a color for pulsing effects (terminal-aware)
-fn brighten_color_ui(color: Color) -> Color {
+/// Brightens a color to its lighter variant (terminal-aware).
+/// Shared by the progress-bar scanner and the border scanner.
+pub fn brighten_color(color: Color) -> Color {
     match color {
         Color::Black => Color::DarkGray,
         Color::DarkGray => Color::Gray,
@@ -198,15 +206,18 @@ fn brighten_color_ui(color: Color) -> Color {
         Color::Blue => Color::LightBlue,
         Color::Magenta => Color::LightMagenta,
         Color::Cyan => Color::LightCyan,
-        Color::LightRed | Color::LightGreen | Color::LightYellow |
-        Color::LightBlue | Color::LightMagenta | Color::LightCyan => Color::White,
-        Color::Rgb(r, g, b) => {
-            Color::Rgb(
-                r.saturating_add(40),
-                g.saturating_add(40),
-                b.saturating_add(40),
-            )
-        }
+        Color::LightRed
+        | Color::LightGreen
+        | Color::LightYellow
+        | Color::LightBlue
+        | Color::LightMagenta
+        | Color::LightCyan
+        | Color::White => Color::White,
+        Color::Rgb(r, g, b) => Color::Rgb(
+            r.saturating_add(80),
+            g.saturating_add(80),
+            b.saturating_add(80),
+        ),
         _ => color,
     }
 }
@@ -226,52 +237,47 @@ fn find_focus_point(word: &str) -> usize {
 
 pub fn render_word_display(
     frame: &mut Frame,
-    word: &str,
-    preview_words: &[&str],
-    current_word: usize,
-    total_words: usize,
-    is_paused: bool,
+    state: &AppState,
     constraints: &UIConstraints,
-    is_inline: bool,
-    border_color: Option<Color>,
+    opts: &RenderOptions,
     border_progress: Option<f32>,
     time_ms: u64,
-    progress_bar_color: Color,
-    focus_color: Color,
-    enable_animations: bool,
-    show_border: bool,
-    show_progress_bar: bool,
 ) -> Rect {
     let area = frame.area();
 
-    // If inline mode and border is enabled, render a border
-    let inner_area = if is_inline && show_border && border_color.is_some() {
-        let base_border_color = border_color.unwrap();
+    let word = state.current_word().unwrap_or("");
+    let preview_words = state.peek_words(opts.preview_count);
+    let current_word = state.current_word_index();
+    let total_words = state.total_words();
+    let is_paused = state.is_paused();
 
-        let inner = Rect {
-            x: area.x + 1,
-            y: area.y + 1,
-            width: area.width.saturating_sub(2),
-            height: area.height.saturating_sub(2),
-        };
+    // Draw a border around the viewport when enabled (both inline and fullscreen)
+    let inner_area = if opts.show_border {
+        if let Some(base_border_color) = opts.border_color {
+            let inner = Rect {
+                x: area.x + 1,
+                y: area.y + 1,
+                width: area.width.saturating_sub(2),
+                height: area.height.saturating_sub(2),
+            };
 
-        // Draw border based on animation settings
-        if enable_animations {
-            // Draw progressive border if animation is active, otherwise draw full border with scanner
-            if let Some(progress) = border_progress {
-                draw_progressive_border(frame.buffer_mut(), area, progress, base_border_color);
+            if opts.enable_animations {
+                // Progressive border while animating, otherwise full border + scanner
+                if let Some(progress) = border_progress {
+                    draw_progressive_border(frame.buffer_mut(), area, progress, base_border_color);
+                } else {
+                    draw_progressive_border(frame.buffer_mut(), area, 1.0, base_border_color);
+                    draw_border_scanner(frame.buffer_mut(), area, time_ms, base_border_color);
+                }
             } else {
-                // Draw complete border with double-line style
+                // No animations - just draw a simple border
                 draw_progressive_border(frame.buffer_mut(), area, 1.0, base_border_color);
-                // Add continuous scanning sweep effect (subtle)
-                draw_border_scanner(frame.buffer_mut(), area, time_ms, base_border_color);
             }
-        } else {
-            // No animations - just draw a simple border
-            draw_progressive_border(frame.buffer_mut(), area, 1.0, base_border_color);
-        }
 
-        inner
+            inner
+        } else {
+            area
+        }
     } else {
         area
     };
@@ -292,21 +298,20 @@ pub fn render_word_display(
         .unwrap_or_default();
     let after: String = chars.iter().skip(focus_idx + 1).collect();
 
-    // Calculate padding to center the focus character
+    // Calculate padding to center the focus character.
+    // Use display width (UnicodeWidthStr) rather than byte length so multibyte
+    // and wide characters before the focus point don't skew the centering.
     let term_width = chunks[1].width as usize;
     let focus_position = term_width / 2;
-    let padding_left = if focus_position > before.len() {
-        focus_position - before.len()
-    } else {
-        0
-    };
+    let before_width = UnicodeWidthStr::width(before.as_str());
+    let padding_left = focus_position.saturating_sub(before_width);
 
     // Build the line: current word + preview words appended inline
     let dim_style = Style::default().fg(Color::DarkGray);
     let mut spans = vec![
         Span::raw(" ".repeat(padding_left)),
         Span::raw(&before),
-        Span::styled(&focus, Style::default().fg(focus_color).bold()),
+        Span::styled(&focus, Style::default().fg(opts.focus_color).bold()),
         Span::raw(&after),
     ];
     for &preview_word in preview_words.iter() {
@@ -319,31 +324,30 @@ pub fn render_word_display(
 
     // Render progress bar if enabled
     let progress_chunk_idx = 2;
-    let progress_area = if show_progress_bar {
+    let progress_area = if opts.show_progress_bar {
         let progress = (current_word + 1) as f64 / total_words as f64;
 
         // Apply pulsing effect if animations are enabled
         let fg_color = if is_paused {
             Color::Rgb(255, 165, 0) // Orange for paused
-        } else if enable_animations {
+        } else if opts.enable_animations {
             // Pulsing effect for the progress bar color (0.9-1.0 intensity)
             let pulse_cycle = 1500.0; // 1.5 second cycle
-            let pulse_phase = (time_ms as f64 % pulse_cycle) / pulse_cycle * 2.0 * std::f64::consts::PI;
+            let pulse_phase =
+                (time_ms as f64 % pulse_cycle) / pulse_cycle * 2.0 * std::f64::consts::PI;
             let pulse_intensity = 0.9 + (pulse_phase.sin() * 0.1);
 
             // Apply pulsing to config color
-            match progress_bar_color {
-                Color::Rgb(r, g, b) => {
-                    Color::Rgb(
-                        (r as f64 * pulse_intensity) as u8,
-                        (g as f64 * pulse_intensity) as u8,
-                        (b as f64 * pulse_intensity) as u8,
-                    )
-                }
-                _ => progress_bar_color, // Use config color as-is for named colors
+            match opts.progress_bar_color {
+                Color::Rgb(r, g, b) => Color::Rgb(
+                    (r as f64 * pulse_intensity) as u8,
+                    (g as f64 * pulse_intensity) as u8,
+                    (b as f64 * pulse_intensity) as u8,
+                ),
+                _ => opts.progress_bar_color, // Use config color as-is for named colors
             }
         } else {
-            progress_bar_color // No animations - use config color as-is
+            opts.progress_bar_color // No animations - use config color as-is
         };
 
         let label_prefix = if is_paused { "⏸ " } else { "▶ " };
@@ -351,15 +355,8 @@ pub fn render_word_display(
 
         // Custom progress bar with transparent background (respects terminal)
         let progress_bar = LineGauge::default()
-            .filled_style(
-                Style::default()
-                    .fg(fg_color)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .unfilled_style(
-                Style::default()
-                    .fg(Color::DarkGray),
-            )
+            .filled_style(Style::default().fg(fg_color).add_modifier(Modifier::BOLD))
+            .unfilled_style(Style::default().fg(Color::DarkGray))
             .line_set(symbols::line::THICK)
             .ratio(progress)
             .label(progress_label);
@@ -373,89 +370,6 @@ pub fn render_word_display(
 
     // Return progress bar area for effects
     progress_area
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // --- find_focus_point ---
-
-    #[test]
-    fn focus_point_single_char() {
-        assert_eq!(find_focus_point("a"), 0);
-    }
-
-    #[test]
-    fn focus_point_two_to_five_chars() {
-        assert_eq!(find_focus_point("ab"), 1);
-        assert_eq!(find_focus_point("abc"), 1);
-        assert_eq!(find_focus_point("hello"), 1); // 5 chars
-    }
-
-    #[test]
-    fn focus_point_six_to_nine_chars() {
-        assert_eq!(find_focus_point("foobar"), 2); // 6 chars
-        assert_eq!(find_focus_point("something"), 2); // 9 chars
-    }
-
-    #[test]
-    fn focus_point_ten_to_thirteen_chars() {
-        assert_eq!(find_focus_point("abcdefghij"), 3); // 10 chars
-        assert_eq!(find_focus_point("abcdefghijklm"), 3); // 13 chars
-    }
-
-    #[test]
-    fn focus_point_fourteen_plus_chars() {
-        assert_eq!(find_focus_point("abcdefghijklmn"), 4); // 14 chars
-        assert_eq!(find_focus_point("abcdefghijklmnopqrstuvwxyz"), 4); // 26 chars
-    }
-
-    #[test]
-    fn focus_point_counts_unicode_chars_not_bytes() {
-        // "café" = 4 chars (c, a, f, é) → bucket 2..=5 → 1
-        assert_eq!(find_focus_point("café"), 1);
-        // "naïveté" = 7 chars → bucket 6..=9 → 2
-        assert_eq!(find_focus_point("naïveté"), 2);
-    }
-
-    // --- UIConstraints ---
-
-    #[test]
-    fn ui_constraints_inline_has_four_rows() {
-        let ui = UIConstraints::new(true, 0);
-        assert_eq!(ui.constraints.len(), 4);
-    }
-
-    #[test]
-    fn ui_constraints_fullscreen_has_four_rows() {
-        let ui = UIConstraints::new(false, 0);
-        assert_eq!(ui.constraints.len(), 4);
-    }
-
-    #[test]
-    fn ui_constraints_preview_count_does_not_change_row_count() {
-        // Preview words are rendered inline; they don't add extra layout rows
-        let ui_zero = UIConstraints::new(true, 0);
-        let ui_five = UIConstraints::new(true, 5);
-        assert_eq!(ui_zero.constraints.len(), ui_five.constraints.len());
-    }
-
-    #[test]
-    fn ui_constraints_inline_uses_small_padding() {
-        use ratatui::layout::Constraint;
-        let ui = UIConstraints::new(true, 0);
-        assert!(matches!(ui.constraints[0], Constraint::Percentage(10)));
-        assert!(matches!(ui.constraints[3], Constraint::Percentage(10)));
-    }
-
-    #[test]
-    fn ui_constraints_fullscreen_uses_fifty_percent_padding() {
-        use ratatui::layout::Constraint;
-        let ui = UIConstraints::new(false, 0);
-        assert!(matches!(ui.constraints[0], Constraint::Percentage(50)));
-        assert!(matches!(ui.constraints[3], Constraint::Percentage(50)));
-    }
 }
 
 /// Renders a centered help popup overlaying the current frame.
@@ -569,7 +483,110 @@ pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16, se
     };
 
     frame.render_widget(
-        Paragraph::new(lines).scroll((effective_scroll, 0)).block(block),
+        Paragraph::new(lines)
+            .scroll((effective_scroll, 0))
+            .block(block),
         popup_area,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- find_focus_point ---
+
+    #[test]
+    fn focus_point_single_char() {
+        assert_eq!(find_focus_point("a"), 0);
+    }
+
+    #[test]
+    fn focus_point_two_to_five_chars() {
+        assert_eq!(find_focus_point("ab"), 1);
+        assert_eq!(find_focus_point("abc"), 1);
+        assert_eq!(find_focus_point("hello"), 1); // 5 chars
+    }
+
+    #[test]
+    fn focus_point_six_to_nine_chars() {
+        assert_eq!(find_focus_point("foobar"), 2); // 6 chars
+        assert_eq!(find_focus_point("something"), 2); // 9 chars
+    }
+
+    #[test]
+    fn focus_point_ten_to_thirteen_chars() {
+        assert_eq!(find_focus_point("abcdefghij"), 3); // 10 chars
+        assert_eq!(find_focus_point("abcdefghijklm"), 3); // 13 chars
+    }
+
+    #[test]
+    fn focus_point_fourteen_plus_chars() {
+        assert_eq!(find_focus_point("abcdefghijklmn"), 4); // 14 chars
+        assert_eq!(find_focus_point("abcdefghijklmnopqrstuvwxyz"), 4); // 26 chars
+    }
+
+    #[test]
+    fn focus_point_counts_unicode_chars_not_bytes() {
+        // "café" = 4 chars (c, a, f, é) → bucket 2..=5 → 1
+        assert_eq!(find_focus_point("café"), 1);
+        // "naïveté" = 7 chars → bucket 6..=9 → 2
+        assert_eq!(find_focus_point("naïveté"), 2);
+    }
+
+    // --- brighten_color ---
+
+    #[test]
+    fn brighten_color_lifts_named_colors() {
+        assert_eq!(brighten_color(Color::Black), Color::DarkGray);
+        assert_eq!(brighten_color(Color::DarkGray), Color::Gray);
+        assert_eq!(brighten_color(Color::Gray), Color::White);
+        assert_eq!(brighten_color(Color::Cyan), Color::LightCyan);
+    }
+
+    #[test]
+    fn brighten_color_lifts_rgb() {
+        assert_eq!(
+            brighten_color(Color::Rgb(60, 100, 100)),
+            Color::Rgb(140, 180, 180)
+        );
+    }
+
+    #[test]
+    fn brighten_color_saturates_at_white() {
+        assert_eq!(
+            brighten_color(Color::Rgb(250, 250, 250)),
+            Color::Rgb(255, 255, 255)
+        );
+    }
+
+    // --- UIConstraints ---
+
+    #[test]
+    fn ui_constraints_inline_has_four_rows() {
+        let ui = UIConstraints::new(true);
+        assert_eq!(ui.constraints.len(), 4);
+    }
+
+    #[test]
+    fn ui_constraints_fullscreen_has_four_rows() {
+        let ui = UIConstraints::new(false);
+        assert_eq!(ui.constraints.len(), 4);
+    }
+
+    #[test]
+    fn ui_constraints_inline_uses_small_padding() {
+        use ratatui::layout::Constraint;
+        let ui = UIConstraints::new(true);
+        assert!(matches!(ui.constraints[0], Constraint::Percentage(10)));
+        assert!(matches!(ui.constraints[3], Constraint::Percentage(10)));
+    }
+
+    #[test]
+    fn ui_constraints_fullscreen_uses_fifty_percent_padding() {
+        use ratatui::layout::Constraint;
+        let ui = UIConstraints::new(false);
+        assert!(matches!(ui.constraints[0], Constraint::Percentage(50)));
+        assert!(matches!(ui.constraints[3], Constraint::Percentage(50)));
+    }
 }

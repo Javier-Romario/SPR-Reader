@@ -115,27 +115,6 @@ impl Config {
         Ok(Self::config_dir()?.join("config.toml"))
     }
 
-    pub fn first_use_marker_path() -> Result<PathBuf> {
-        Ok(Self::config_dir()?.join(".first_use_complete"))
-    }
-
-    pub fn is_first_use() -> Result<bool> {
-        let marker_path = Self::first_use_marker_path()?;
-        Ok(!marker_path.exists())
-    }
-
-    pub fn mark_first_use_complete() -> Result<()> {
-        let marker_path = Self::first_use_marker_path()?;
-
-        // Ensure directory exists
-        if let Some(parent) = marker_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        fs::write(&marker_path, "")?;
-        Ok(())
-    }
-
     pub fn parse_border_color(&self) -> Color {
         Self::parse_color_string(&self.border_color)
     }
@@ -249,13 +228,19 @@ mod tests {
 
     #[test]
     fn parse_hex_default_color() {
-        assert_eq!(Config::parse_color_string("#3c6464"), Color::Rgb(60, 100, 100));
+        assert_eq!(
+            Config::parse_color_string("#3c6464"),
+            Color::Rgb(60, 100, 100)
+        );
     }
 
     #[test]
     fn parse_hex_black_and_white() {
         assert_eq!(Config::parse_color_string("#000000"), Color::Rgb(0, 0, 0));
-        assert_eq!(Config::parse_color_string("#ffffff"), Color::Rgb(255, 255, 255));
+        assert_eq!(
+            Config::parse_color_string("#ffffff"),
+            Color::Rgb(255, 255, 255)
+        );
     }
 
     #[test]
@@ -266,7 +251,7 @@ mod tests {
 
     #[test]
     fn parse_hex_wrong_length_falls_back() {
-        assert_eq!(Config::parse_color_string("#fff"), Color::Cyan);    // 4 chars
+        assert_eq!(Config::parse_color_string("#fff"), Color::Cyan); // 4 chars
         assert_eq!(Config::parse_color_string("#ffffffff"), Color::Cyan); // 9 chars
     }
 
@@ -275,20 +260,29 @@ mod tests {
     #[test]
     fn parse_rgb_decimal() {
         assert_eq!(Config::parse_color_string("255,0,0"), Color::Rgb(255, 0, 0));
-        assert_eq!(Config::parse_color_string("60,100,100"), Color::Rgb(60, 100, 100));
+        assert_eq!(
+            Config::parse_color_string("60,100,100"),
+            Color::Rgb(60, 100, 100)
+        );
         assert_eq!(Config::parse_color_string("0,0,0"), Color::Rgb(0, 0, 0));
     }
 
     #[test]
     fn parse_rgb_decimal_with_spaces() {
-        assert_eq!(Config::parse_color_string("255, 0, 0"), Color::Rgb(255, 0, 0));
-        assert_eq!(Config::parse_color_string(" 60 , 100 , 100 "), Color::Rgb(60, 100, 100));
+        assert_eq!(
+            Config::parse_color_string("255, 0, 0"),
+            Color::Rgb(255, 0, 0)
+        );
+        assert_eq!(
+            Config::parse_color_string(" 60 , 100 , 100 "),
+            Color::Rgb(60, 100, 100)
+        );
     }
 
     #[test]
     fn parse_rgb_wrong_part_count_falls_back() {
-        assert_eq!(Config::parse_color_string("1,2"), Color::Cyan);       // 2 parts
-        assert_eq!(Config::parse_color_string("1,2,3,4"), Color::Cyan);   // 4 parts
+        assert_eq!(Config::parse_color_string("1,2"), Color::Cyan); // 2 parts
+        assert_eq!(Config::parse_color_string("1,2,3,4"), Color::Cyan); // 4 parts
     }
 
     // --- parse_color_string: fallback ---
@@ -304,15 +298,19 @@ mod tests {
 
     #[test]
     fn parse_border_color_delegates_to_parse_color_string() {
-        let mut c = Config::default();
-        c.border_color = "#ff0000".to_string();
+        let c = Config {
+            border_color: "#ff0000".to_string(),
+            ..Default::default()
+        };
         assert_eq!(c.parse_border_color(), Color::Rgb(255, 0, 0));
     }
 
     #[test]
     fn parse_progress_bar_color_delegates() {
-        let mut c = Config::default();
-        c.progress_bar_color = "green".to_string();
+        let c = Config {
+            progress_bar_color: "green".to_string(),
+            ..Default::default()
+        };
         assert_eq!(c.parse_progress_bar_color(), Color::Green);
     }
 
@@ -320,25 +318,30 @@ mod tests {
 
     #[test]
     fn focus_color_absent_falls_back_to_border() {
-        let mut c = Config::default();
-        c.border_color = "red".to_string();
-        c.focus_color = None;
+        let c = Config {
+            border_color: "red".to_string(),
+            ..Default::default()
+        };
         assert_eq!(c.parse_focus_color(), Color::Red);
     }
 
     #[test]
     fn focus_color_empty_string_falls_back_to_border() {
-        let mut c = Config::default();
-        c.border_color = "red".to_string();
-        c.focus_color = Some("".to_string());
+        let c = Config {
+            border_color: "red".to_string(),
+            focus_color: Some("".to_string()),
+            ..Default::default()
+        };
         assert_eq!(c.parse_focus_color(), Color::Red);
     }
 
     #[test]
     fn focus_color_explicit_overrides_border() {
-        let mut c = Config::default();
-        c.border_color = "red".to_string();
-        c.focus_color = Some("blue".to_string());
+        let c = Config {
+            border_color: "red".to_string(),
+            focus_color: Some("blue".to_string()),
+            ..Default::default()
+        };
         assert_eq!(c.parse_focus_color(), Color::Blue);
     }
 

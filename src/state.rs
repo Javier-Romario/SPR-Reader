@@ -12,14 +12,32 @@ pub struct AppState<'a> {
 impl<'a> AppState<'a> {
     pub fn new(content: &'a str, wpm: u64) -> Self {
         let words: Vec<&'a str> = content.split_whitespace().collect();
-        let delay = Duration::from_secs_f64(60.0 / wpm as f64);
-
-        Self {
+        let mut state = Self {
             words,
             current_word: 0,
             paused: false,
             wpm,
-            next_tick: Instant::now() + delay,
+            next_tick: Instant::now(),
+        };
+        state.next_tick = Instant::now() + state.current_word_delay();
+        state
+    }
+
+    /// Time the current word should stay on screen: base WPM interval plus an
+    /// extra pause when the word ends a sentence.
+    ///
+    /// The pause is folded into `next_tick` (not the event-poll timeout), so it
+    /// genuinely slows the reader instead of being a no-op.
+    fn current_word_delay(&self) -> Duration {
+        let base = Duration::from_secs_f64(60.0 / self.wpm as f64);
+        let ends_sentence = self
+            .current_word()
+            .and_then(|word| word.chars().last())
+            .is_some_and(|c| matches!(c, '.' | '!' | '?' | ';'));
+        if ends_sentence {
+            base + Duration::from_millis(500)
+        } else {
+            base
         }
     }
 
@@ -40,24 +58,18 @@ impl<'a> AppState<'a> {
         if self.current_word >= self.words.len() {
             return false; // No more words
         }
-        let delay = Duration::from_secs_f64(60.0 / self.wpm as f64);
-        self.next_tick = Instant::now() + delay;
+        self.next_tick = Instant::now() + self.current_word_delay();
         true // More words remaining
     }
 
     pub fn get_timeout(&self) -> Duration {
-        let last_char = self.current_word()
-            .and_then(|word| word.chars().last())
-            .unwrap_or(' ');
-
-        // Only pause on sentence-ending punctuation
-        let punctuation_delay = if matches!(last_char, '.' | '!' | '?' | ';') {
-            Duration::from_secs_f64(0.5)
-        } else {
-            Duration::from_secs(0)
-        };
-
-        self.next_tick.saturating_duration_since(Instant::now()) + punctuation_delay
+        if self.paused {
+            // Block briefly while paused; key events still wake the poll
+            // immediately, so responsiveness is unaffected. Avoids a busy loop
+            // once `next_tick` has elapsed.
+            return Duration::from_millis(100);
+        }
+        self.next_tick.saturating_duration_since(Instant::now())
     }
 
     pub fn current_word_index(&self) -> usize {
@@ -85,8 +97,7 @@ impl<'a> AppState<'a> {
             .max(0)
             .min((self.words.len() as isize).saturating_sub(1)) as usize;
         self.current_word = new_index;
-        let delay = Duration::from_secs_f64(60.0 / self.wpm as f64);
-        self.next_tick = Instant::now() + delay;
+        self.next_tick = Instant::now() + self.current_word_delay();
     }
 }
 
@@ -277,5 +288,25 @@ mod tests {
         let timeout = state.get_timeout();
         assert!(timeout.as_millis() <= 250);
     }
-}
 
+    #[test]
+    fn get_timeout_blocks_briefly_while_paused() {
+        let mut state = AppState::new("hello world", 300);
+        state.toggle_pause();
+        assert_eq!(state.get_timeout(), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn advance_onto_sentence_punctuation_adds_delay() {
+        let mut state = AppState::new("go stop.", 300);
+        state.advance_word(); // -> "stop." ends with '.'
+        assert!(state.get_timeout().as_millis() >= 450);
+    }
+
+    #[test]
+    fn advance_onto_non_sentence_punctuation_keeps_base_delay() {
+        let mut state = AppState::new("go stop,", 300);
+        state.advance_word(); // -> "stop," no extra delay
+        assert!(state.get_timeout().as_millis() <= 250);
+    }
+}

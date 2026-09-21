@@ -16,8 +16,8 @@ pub struct Args {
     #[arg(short, long)]
     pub file: Option<String>,
 
-    /// Words per minute
-    #[arg(long, default_value = "300")]
+    /// Words per minute (at least 1)
+    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
     pub wpm: u64,
 
     /// Number of upcoming words to preview below the current word
@@ -58,20 +58,41 @@ mod tests {
     use super::*;
 
     fn args_with_text(text: &str) -> Args {
-        Args { text: Some(text.to_string()), file: None, wpm: 300, preview_words: None, inline: None }
+        Args {
+            text: Some(text.to_string()),
+            file: None,
+            wpm: 300,
+            preview_words: None,
+            inline: None,
+        }
     }
 
     fn args_with_file(path: &str) -> Args {
-        Args { text: None, file: Some(path.to_string()), wpm: 300, preview_words: None, inline: None }
+        Args {
+            text: None,
+            file: Some(path.to_string()),
+            wpm: 300,
+            preview_words: None,
+            inline: None,
+        }
     }
 
     fn args_empty() -> Args {
-        Args { text: None, file: None, wpm: 300, preview_words: None, inline: None }
+        Args {
+            text: None,
+            file: None,
+            wpm: 300,
+            preview_words: None,
+            inline: None,
+        }
     }
 
     #[test]
     fn get_content_returns_text_arg() {
-        assert_eq!(get_content(&args_with_text("hello world")).unwrap(), "hello world");
+        assert_eq!(
+            get_content(&args_with_text("hello world")).unwrap(),
+            "hello world"
+        );
     }
 
     #[test]
@@ -82,7 +103,10 @@ mod tests {
 
     #[test]
     fn get_content_text_preserves_whitespace() {
-        assert_eq!(get_content(&args_with_text("  leading and trailing  ")).unwrap(), "  leading and trailing  ");
+        assert_eq!(
+            get_content(&args_with_text("  leading and trailing  ")).unwrap(),
+            "  leading and trailing  "
+        );
     }
 
     #[test]
@@ -117,5 +141,12 @@ mod tests {
         let result = get_content(&args_empty());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("stdin pipe"));
+    }
+
+    #[test]
+    fn wpm_zero_is_rejected() {
+        use clap::error::ErrorKind;
+        let err = Args::try_parse_from(["spr", "--wpm", "0"]).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::ValueValidation);
     }
 }
