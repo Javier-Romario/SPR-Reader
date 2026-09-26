@@ -1,6 +1,5 @@
 use crate::state::AppState;
 use ratatui::{
-    buffer::Buffer,
     layout::{Alignment, Rect},
     prelude::*,
     text::{Line, Span},
@@ -15,192 +14,19 @@ pub struct RenderOptions {
     pub border_color: Option<Color>,
     pub progress_bar_color: Color,
     pub focus_color: Color,
-    pub enable_animations: bool,
     pub show_border: bool,
     pub show_progress_bar: bool,
 }
 
-/// Draws a border progressively with cyberpunk effects (0.0 to 1.0)
-/// Sequence: left verticals -> top/bottom verticals -> corners (with flash) -> horizontals (with glow trail)
-fn draw_progressive_border(buf: &mut Buffer, area: Rect, progress: f32, color: Color) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-
-    let max_x = area.right().saturating_sub(1);
-    let max_y = area.bottom().saturating_sub(1);
-    let mid_y = area.y + area.height / 2;
-
-    // Total animation stages
-    let total_stages = 4.0 + (area.width as f32 - 2.0);
-    let current_stage = (progress * total_stages).floor() as usize;
-    let stage_progress = (progress * total_stages).fract();
-
-    // Stage 0-1: Draw left edge verticals (subtle, no glow)
-    // Center vertical (always drawn first)
-    buf[(area.x, mid_y)].set_symbol("┃").set_fg(color);
-
-    if current_stage >= 1 {
-        // Top third and bottom third
-        let third_y = area.y + area.height / 3;
-        let two_third_y = area.y + (area.height * 2) / 3;
-
-        buf[(area.x, third_y)].set_symbol("┃").set_fg(color);
-        buf[(area.x, two_third_y)].set_symbol("┃").set_fg(color);
-    }
-
-    // Stage 2: Add vertical bars on top and bottom edges
-    if current_stage >= 2 {
-        let mid_x = area.x + area.width / 2;
-
-        buf[(mid_x, area.y)].set_symbol("┃").set_fg(color);
-        buf[(mid_x, max_y)].set_symbol("┃").set_fg(color);
-    }
-
-    // Stage 3: Add corners (subtle, no flash)
-    if current_stage >= 3 {
-        // Use special corner characters for clean look
-        buf[(area.x, area.y)].set_symbol("╔").set_fg(color);
-        buf[(max_x, area.y)].set_symbol("╗").set_fg(color);
-        buf[(area.x, max_y)].set_symbol("╚").set_fg(color);
-        buf[(max_x, max_y)].set_symbol("╝").set_fg(color);
-    }
-
-    // Stage 4+: Draw horizontal lines progressively (subtle trailing glow)
-    if current_stage >= 4 {
-        let horiz_chars = (area.width as f32 - 2.0) as usize;
-        let chars_to_draw = if current_stage >= 4 + horiz_chars {
-            horiz_chars
-        } else {
-            let base = current_stage - 4;
-            base + (stage_progress > 0.0) as usize
-        };
-
-        // Draw top and bottom edges with very subtle glow trail
-        for i in 0..chars_to_draw.min(horiz_chars) {
-            let x = area.x + 1 + i as u16;
-
-            // Calculate distance from drawing head for subtle glow effect
-            let distance_from_head = chars_to_draw.saturating_sub(i);
-            let line_color = if distance_from_head == 0 {
-                // Only the drawing head gets subtle brightening
-                brighten_color(color)
-            } else {
-                color
-            };
-
-            buf[(x, area.y)].set_symbol("═").set_fg(line_color);
-            buf[(x, max_y)].set_symbol("═").set_fg(line_color);
-        }
-    }
-
-    // Fill remaining vertical edges with double-line style
-    if current_stage >= 4 {
-        for y in area.y + 1..max_y {
-            if y != mid_y && y != area.y + area.height / 3 && y != area.y + (area.height * 2) / 3 {
-                buf[(area.x, y)].set_symbol("║").set_fg(color);
-            }
-            buf[(max_x, y)].set_symbol("║").set_fg(color);
-        }
-    }
-}
-
-/// Adds a continuous scanning sweep effect around the border perimeter
-/// Creates a bright spot that travels around the border edges
-fn draw_border_scanner(buf: &mut Buffer, area: Rect, time_ms: u64, color: Color) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
-
-    let max_x = area.right().saturating_sub(1);
-    let max_y = area.bottom().saturating_sub(1);
-
-    // Calculate total perimeter (excluding corners to avoid double counting)
-    let perimeter = ((area.width - 2) * 2 + (area.height - 2) * 2) as f64;
-
-    // Scanner completes a full loop every 3 seconds
-    let scan_duration = 3000.0;
-    let scan_progress = (time_ms as f64 % scan_duration) / scan_duration;
-    let current_position = (scan_progress * perimeter) as u16;
-
-    // Track position along perimeter
-    let mut pos = 0u16;
-
-    // Helper to check if we should glow at this position (subtle)
-    let should_glow = |p: u16| -> Option<Color> {
-        let dist = if p > current_position {
-            p.saturating_sub(current_position)
-                .min(current_position + perimeter as u16 - p)
-        } else {
-            current_position.saturating_sub(p)
-        };
-
-        match dist {
-            0 => Some(brighten_color(color)), // Scanner head (subtle)
-            _ => None,                        // No glow trail
-        }
-    };
-
-    // Top edge (left to right)
-    for x in area.x + 1..max_x {
-        if let Some(glow_color) = should_glow(pos) {
-            buf[(x, area.y)].set_fg(glow_color);
-        }
-        pos += 1;
-    }
-
-    // Right edge (top to bottom)
-    for y in area.y + 1..max_y {
-        if let Some(glow_color) = should_glow(pos) {
-            buf[(max_x, y)].set_fg(glow_color);
-        }
-        pos += 1;
-    }
-
-    // Bottom edge (right to left)
-    for x in (area.x + 1..max_x).rev() {
-        if let Some(glow_color) = should_glow(pos) {
-            buf[(x, max_y)].set_fg(glow_color);
-        }
-        pos += 1;
-    }
-
-    // Left edge (bottom to top)
-    for y in (area.y + 1..max_y).rev() {
-        if let Some(glow_color) = should_glow(pos) {
-            buf[(area.x, y)].set_fg(glow_color);
-        }
-        pos += 1;
-    }
-}
-
-/// Brightens a color to its lighter variant (terminal-aware).
-/// Shared by the progress-bar scanner and the border scanner.
-pub fn brighten_color(color: Color) -> Color {
-    match color {
-        Color::Black => Color::DarkGray,
-        Color::DarkGray => Color::Gray,
-        Color::Gray => Color::White,
-        Color::Red => Color::LightRed,
-        Color::Green => Color::LightGreen,
-        Color::Yellow => Color::LightYellow,
-        Color::Blue => Color::LightBlue,
-        Color::Magenta => Color::LightMagenta,
-        Color::Cyan => Color::LightCyan,
-        Color::LightRed
-        | Color::LightGreen
-        | Color::LightYellow
-        | Color::LightBlue
-        | Color::LightMagenta
-        | Color::LightCyan
-        | Color::White => Color::White,
-        Color::Rgb(r, g, b) => Color::Rgb(
-            r.saturating_add(80),
-            g.saturating_add(80),
-            b.saturating_add(80),
-        ),
-        _ => color,
-    }
+/// The regions `render_word_display` painted, returned so callers can target
+/// TachyonFX effects at the word, the progress bar, or the whole box.
+pub struct RenderAreas {
+    /// Full box including the border (or the content box when borderless).
+    pub box_area: Rect,
+    /// The word line.
+    pub word: Rect,
+    /// The progress bar row (zero-sized when disabled).
+    pub progress: Rect,
 }
 
 /// Find the optimal focus point (character index) for a word
@@ -220,9 +46,7 @@ pub fn render_word_display(
     frame: &mut Frame,
     state: &AppState,
     opts: &RenderOptions,
-    border_progress: Option<f32>,
-    time_ms: u64,
-) -> Rect {
+) -> RenderAreas {
     let area = frame.area();
 
     let word = state.current_word().unwrap_or("");
@@ -297,21 +121,18 @@ pub fn render_word_display(
         height: box_height as u16,
     };
 
-    let content_rect = if show_border {
+    // Draw the border around the box; TachyonFX reveals it on startup.
+    if show_border {
         if let Some(base_border_color) = opts.border_color {
-            if opts.enable_animations {
-                // Progressive border while animating, otherwise full border + scanner
-                if let Some(progress) = border_progress {
-                    draw_progressive_border(frame.buffer_mut(), box_rect, progress, base_border_color);
-                } else {
-                    draw_progressive_border(frame.buffer_mut(), box_rect, 1.0, base_border_color);
-                    draw_border_scanner(frame.buffer_mut(), box_rect, time_ms, base_border_color);
-                }
-            } else {
-                // No animations - just draw a simple border
-                draw_progressive_border(frame.buffer_mut(), box_rect, 1.0, base_border_color);
-            }
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(base_border_color));
+            frame.render_widget(block, box_rect);
         }
+    }
+
+    let content_rect = if show_border {
         Rect {
             x: box_rect.x + 1,
             y: box_rect.y + 1,
@@ -344,7 +165,7 @@ pub fn render_word_display(
     frame.render_widget(Paragraph::new(line).alignment(Alignment::Left), word_rect);
 
     // Progress bar sits directly below the word line.
-    let progress_area = Rect {
+    let progress_rect = Rect {
         x: content_rect.x,
         y: content_rect.y + 1,
         width: content_rect.width,
@@ -353,28 +174,10 @@ pub fn render_word_display(
 
     if opts.show_progress_bar {
         let progress = (current_word + 1) as f64 / total_words as f64;
-
-        // Apply pulsing effect if animations are enabled
         let fg_color = if is_paused {
             Color::Rgb(255, 165, 0) // Orange for paused
-        } else if opts.enable_animations {
-            // Pulsing effect for the progress bar color (0.9-1.0 intensity)
-            let pulse_cycle = 1500.0; // 1.5 second cycle
-            let pulse_phase =
-                (time_ms as f64 % pulse_cycle) / pulse_cycle * 2.0 * std::f64::consts::PI;
-            let pulse_intensity = 0.9 + (pulse_phase.sin() * 0.1);
-
-            // Apply pulsing to config color
-            match opts.progress_bar_color {
-                Color::Rgb(r, g, b) => Color::Rgb(
-                    (r as f64 * pulse_intensity) as u8,
-                    (g as f64 * pulse_intensity) as u8,
-                    (b as f64 * pulse_intensity) as u8,
-                ),
-                _ => opts.progress_bar_color, // Use config color as-is for named colors
-            }
         } else {
-            opts.progress_bar_color // No animations - use config color as-is
+            opts.progress_bar_color
         };
 
         // Custom progress bar with transparent background (respects terminal)
@@ -385,11 +188,13 @@ pub fn render_word_display(
             .ratio(progress)
             .label(progress_label);
 
-        frame.render_widget(progress_bar, progress_area);
-        progress_area
-    } else {
-        // Return empty area if progress bar is disabled
-        Rect::default()
+        frame.render_widget(progress_bar, progress_rect);
+    }
+
+    RenderAreas {
+        box_area: box_rect,
+        word: word_rect,
+        progress: progress_rect,
     }
 }
 
@@ -555,30 +360,46 @@ mod tests {
         assert_eq!(find_focus_point("naïveté"), 2);
     }
 
-    // --- brighten_color ---
+    // --- render_word_display ---
 
     #[test]
-    fn brighten_color_lifts_named_colors() {
-        assert_eq!(brighten_color(Color::Black), Color::DarkGray);
-        assert_eq!(brighten_color(Color::DarkGray), Color::Gray);
-        assert_eq!(brighten_color(Color::Gray), Color::White);
-        assert_eq!(brighten_color(Color::Cyan), Color::LightCyan);
-    }
+    fn render_word_display_draws_border_word_and_progress() {
+        use ratatui::backend::TestBackend;
 
-    #[test]
-    fn brighten_color_lifts_rgb() {
-        assert_eq!(
-            brighten_color(Color::Rgb(60, 100, 100)),
-            Color::Rgb(140, 180, 180)
-        );
-    }
+        let state = AppState::new("hello world", 300);
+        let opts = RenderOptions {
+            preview_count: 0,
+            border_color: Some(Color::Cyan),
+            progress_bar_color: Color::Cyan,
+            focus_color: Color::Red,
+            show_border: true,
+            show_progress_bar: true,
+        };
 
-    #[test]
-    fn brighten_color_saturates_at_white() {
-        assert_eq!(
-            brighten_color(Color::Rgb(250, 250, 250)),
-            Color::Rgb(255, 255, 255)
-        );
-    }
+        let backend = TestBackend::new(50, 10);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let mut areas: Option<RenderAreas> = None;
+        terminal
+            .draw(|f| {
+                areas = Some(render_word_display(f, &state, &opts));
+            })
+            .unwrap();
 
+        let areas = areas.unwrap();
+        let buf = terminal.backend().buffer();
+
+        let mut text = String::new();
+        for y in 0..buf.area.height {
+            for x in 0..buf.area.width {
+                text.push_str(buf[(x, y)].symbol());
+            }
+        }
+
+        assert!(text.contains("hello"), "word should be rendered");
+        assert!(text.contains('╔') || text.contains('═'), "border should be rendered");
+        assert!(areas.word.width > 0);
+        assert!(areas.progress.width > 0);
+        assert!(areas.box_area.width >= areas.word.width);
+    }
 }
+

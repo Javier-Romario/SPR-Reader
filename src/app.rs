@@ -1,38 +1,17 @@
 use crate::{config::Config, events, state::AppState, tui::Tui, ui};
 use color_eyre::Result;
-use ratatui::{buffer::Buffer, layout::Rect, style::Color};
-use std::time::Instant;
+use ratatui::layout::Margin;
+use ratatui::style::Color;
+use std::time::{Duration as StdDuration, Instant};
+use tachyonfx::{fx, CellFilter, Effect, EffectRenderer, Interpolation, Motion};
 
-/// Adds a sweeping scanner effect to the progress bar.
-/// A beam sweeps left-to-right every 2.5s, brightening the cells it passes.
-fn add_progress_scanner_effect(buffer: &mut Buffer, area: Rect, time_ms: u64) {
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-
-    let sweep_duration = 2500.0;
-    let sweep_progress = (time_ms as f64 % sweep_duration) / sweep_duration;
-    let scanner_x = area.x + (sweep_progress * area.width as f64) as u16;
-
-    if scanner_x >= area.x && scanner_x < area.x + area.width {
-        for y in area.y..area.y + area.height {
-            // Gaussian-like intensity falloff across a 5-cell beam
-            for offset in -2i16..=2 {
-                let x = scanner_x as i16 + offset;
-                if x >= area.x as i16 && x < (area.x + area.width) as i16 {
-                    if let Some(cell) = buffer.cell_mut((x as u16, y)) {
-                        let distance = offset.abs() as f64;
-                        let intensity = (-distance * distance / 2.0).exp();
-                        if intensity > 0.6 {
-                            cell.set_fg(Color::White);
-                        } else if intensity > 0.2 {
-                            cell.set_fg(ui::brighten_color(cell.fg));
-                        }
-                    }
-                }
-            }
-        }
-    }
+/// Color-tint a freshly-rendered word in from the theme accent.
+///
+/// Keeps the glyphs fully formed the whole time (only the foreground color
+/// transitions), so the word stays readable while still animating — unlike
+/// `coalesce`/`dissolve`, which scramble the text during the reveal.
+fn word_transition(accent: Color) -> Effect {
+    fx::fade_from_fg(accent, (80, Interpolation::QuadOut))
 }
 
 pub fn run(
@@ -57,20 +36,37 @@ pub fn run(
         border_color,
         progress_bar_color: config.parse_progress_bar_color(),
         focus_color: config.parse_focus_color(),
-        enable_animations: config.enable_animations,
         show_border: config.show_border,
         show_progress_bar: config.show_progress_bar,
     };
 
     let seek_step = config.seek_step.max(1) as isize;
+    let animations = config.enable_animations;
 
-    // Border animation setup (only if animations are enabled and a border is drawn)
-    let border_animation_duration_ms = 600.0; // 0.6 seconds for full animation
-    let animation_start = Instant::now();
-    let should_animate_border = border_color.is_some() && config.enable_animations;
+    // TachyonFX effects are stateful: create once, apply every frame after
+    // the widgets render. Startup and word effects are one-shot; the progress
+    // bar sweep runs indefinitely.
+    //
+    // Startup reveals only the border ring (CellFilter::Outer), so the first
+    // word and progress bar are readable immediately instead of materializing.
+    let accent = config.parse_border_color();
+    let mut startup_fx: Option<Effect> = animations.then(|| {
+        fx::coalesce((600, Interpolation::QuadOut))
+            .with_filter(CellFilter::Outer(Margin::new(1, 1)))
+    });
+    let mut word_fx: Option<Effect> = None;
+    let mut progress_fx: Option<Effect> = (animations && config.show_progress_bar).then(|| {
+        fx::repeating(fx::sweep_in(
+            Motion::LeftToRight,
+            6,
+            0,
+            Color::DarkGray,
+            (1500, Interpolation::Linear),
+        ))
+    });
 
-    // Track total elapsed time for animations
-    let session_start = Instant::now();
+    let mut last_frame = Instant::now();
+    let mut last_word_idx = app_state.current_word_index();
 
     // Help overlay state
     let mut show_help = false;
@@ -78,33 +74,24 @@ pub fn run(
     let help_border_color = config.parse_border_color();
 
     loop {
+        let now = Instant::now();
+        let frame_dt = now - last_frame;
+        last_frame = now;
+        let dt: tachyonfx::Duration = frame_dt.into();
+
         terminal.draw(|f| {
-            let time_ms = session_start.elapsed().as_millis() as u64;
+            let areas = ui::render_word_display(f, &app_state, &render_opts);
 
-            // Calculate border animation progress
-            let border_progress = if should_animate_border {
-                let elapsed_ms = animation_start.elapsed().as_millis() as f32;
-                let progress = (elapsed_ms / border_animation_duration_ms).min(1.0);
-                if progress < 1.0 {
-                    Some(progress)
-                } else {
-                    None // Animation complete, use normal border
+            if animations {
+                if let Some(fx) = startup_fx.as_mut() {
+                    f.render_effect(fx, areas.box_area, dt);
                 }
-            } else {
-                None
-            };
-
-            let progress_area = ui::render_word_display(
-                f,
-                &app_state,
-                &render_opts,
-                border_progress,
-                time_ms,
-            );
-
-            // Apply scanner sweep effect to progress bar (only if animations enabled)
-            if config.enable_animations && config.show_progress_bar {
-                add_progress_scanner_effect(f.buffer_mut(), progress_area, time_ms);
+                if let Some(fx) = word_fx.as_mut() {
+                    f.render_effect(fx, areas.word, dt);
+                }
+                if let Some(fx) = progress_fx.as_mut() {
+                    f.render_effect(fx, areas.progress, dt);
+                }
             }
 
             // Render help popup on top of everything else
@@ -113,7 +100,21 @@ pub fn run(
             }
         })?;
 
-        let timeout = app_state.get_timeout();
+        // Drop one-shot effects once they finish.
+        if startup_fx.as_ref().is_some_and(|fx| !fx.running()) {
+            startup_fx = None;
+        }
+        if word_fx.as_ref().is_some_and(|fx| !fx.running()) {
+            word_fx = None;
+        }
+
+        // Poll at a steady rate so effects animate smoothly. Word timing is
+        // still driven by `should_advance()` against the wall clock.
+        let timeout = if animations {
+            StdDuration::from_millis(16)
+        } else {
+            app_state.get_timeout()
+        };
 
         match events::handle_events(timeout)? {
             events::AppEvent::Quit => {
@@ -154,20 +155,17 @@ pub fn run(
             events::AppEvent::Continue => {}
         }
 
-        // Only advance words after the border animation completes and help is hidden
-        let animation_complete = if should_animate_border {
-            animation_start.elapsed().as_millis() as f32 >= border_animation_duration_ms
-        } else {
-            true // No animation, proceed immediately
-        };
-
-        if animation_complete
-            && !show_help
-            && app_state.should_advance()
-            && !app_state.advance_word()
-        {
+        // Advance the word when its display window elapses.
+        if !show_help && app_state.should_advance() && !app_state.advance_word() {
             break; // Reading complete
         }
+
+        // Trigger a transition whenever the visible word changes (advance or seek).
+        let new_idx = app_state.current_word_index();
+        if animations && new_idx != last_word_idx {
+            word_fx = Some(word_transition(accent));
+        }
+        last_word_idx = new_idx;
     }
 
     Ok(())
