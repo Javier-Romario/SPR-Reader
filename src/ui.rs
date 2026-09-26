@@ -27,6 +27,8 @@ pub struct RenderAreas {
     pub word: Rect,
     /// The progress bar row (zero-sized when disabled).
     pub progress: Rect,
+    /// Absolute x of the focus letter (used to keep it out of effects).
+    pub focus_x: u16,
 }
 
 /// Style for a token kind. The focus letter is styled separately so it stays
@@ -226,6 +228,7 @@ pub fn render_word_display(
         box_area: box_rect,
         word: word_rect,
         progress: progress_rect,
+        focus_x: word_rect.x + (padding_left + before_width) as u16,
     }
 }
 

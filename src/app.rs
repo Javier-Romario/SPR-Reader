@@ -1,17 +1,24 @@
 use crate::{config::Config, events, state::AppState, tui::Tui, ui};
 use color_eyre::Result;
-use ratatui::layout::Margin;
+use ratatui::layout::{Margin, Position};
 use ratatui::style::Color;
 use std::time::{Duration as StdDuration, Instant};
-use tachyonfx::{fx, CellFilter, Effect, EffectRenderer, Interpolation, Motion};
+use tachyonfx::{fx, ref_count, CellFilter, Effect, EffectRenderer, Interpolation, Motion};
 
 /// Color-tint a freshly-rendered word in from the theme accent.
 ///
-/// Keeps the glyphs fully formed the whole time (only the foreground color
-/// transitions), so the word stays readable while still animating — unlike
-/// `coalesce`/`dissolve`, which scramble the text during the reveal.
-fn word_transition(accent: Color) -> Effect {
-    fx::fade_from_fg(accent, (80, Interpolation::QuadOut))
+/// Duration scales with WPM so fast words aren't still fading when the next one
+/// lands. The focus letter is excluded from the fade (it stays at full focus
+/// color instantly) so the anchor is always readable.
+fn word_transition(accent: Color, wpm: u64, focus_x: u16) -> Effect {
+    let window_ms = 60_000.0 / wpm.max(1) as f64;
+    let fade_ms = (window_ms * 0.25).clamp(15.0, 90.0) as u32;
+
+    fx::fade_from_fg(accent, (fade_ms, Interpolation::QuadOut)).with_filter(
+        CellFilter::Not(Box::new(CellFilter::PositionFn(ref_count(
+            move |p: Position| p.x == focus_x,
+        )))),
+    )
 }
 
 pub fn run(
@@ -73,6 +80,9 @@ pub fn run(
     let mut help_scroll: u16 = 0;
     let help_border_color = config.parse_border_color();
 
+    // Absolute x of the current focus letter, so the word effect can skip it.
+    let mut focus_x = 0u16;
+
     loop {
         let now = Instant::now();
         let frame_dt = now - last_frame;
@@ -81,6 +91,7 @@ pub fn run(
 
         terminal.draw(|f| {
             let areas = ui::render_word_display(f, &app_state, &render_opts);
+            focus_x = areas.focus_x;
 
             if animations {
                 if let Some(fx) = startup_fx.as_mut() {
@@ -163,7 +174,7 @@ pub fn run(
         // Trigger a transition whenever the visible word changes (advance or seek).
         let new_idx = app_state.current_word_index();
         if animations && new_idx != last_word_idx {
-            word_fx = Some(word_transition(accent));
+            word_fx = Some(word_transition(accent, wpm, focus_x));
         }
         last_word_idx = new_idx;
     }
