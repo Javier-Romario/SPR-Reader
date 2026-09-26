@@ -1,5 +1,50 @@
 use std::time::{Duration, Instant};
 
+/// Tokens longer than this are split further so a single flash stays readable.
+const LONG_TOKEN_CHARS: usize = 24;
+
+/// Split `content` into reading units. Whitespace is the primary separator;
+/// unusually long tokens (code identifiers, paths, URLs) are additionally split
+/// on punctuation and camelCase boundaries so they don't render as one giant
+/// unreadable (or clipped) flash.
+fn tokenize(content: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    for token in content.split_whitespace() {
+        if token.chars().count() <= LONG_TOKEN_CHARS {
+            out.push(token);
+        } else {
+            split_long_token(token, &mut out);
+        }
+    }
+    out
+}
+
+/// Split a long token on punctuation and camelCase boundaries, dropping the
+/// separator characters themselves.
+fn split_long_token<'a>(token: &'a str, out: &mut Vec<&'a str>) {
+    let mut byte_start = 0;
+    let mut prev_lower_or_digit = false;
+
+    for (bi, c) in token.char_indices() {
+        let is_punct = matches!(c, '/' | '\\' | '_' | '-' | '.' | ':' | '|' | '`');
+        let is_camel = c.is_uppercase() && prev_lower_or_digit;
+
+        if is_punct || is_camel {
+            if byte_start < bi {
+                out.push(&token[byte_start..bi]);
+            }
+            // Skip punctuation; start the next segment at an uppercase char.
+            byte_start = bi + if is_punct { c.len_utf8() } else { 0 };
+        }
+
+        prev_lower_or_digit = c.is_lowercase() || c.is_numeric();
+    }
+
+    if byte_start < token.len() {
+        out.push(&token[byte_start..]);
+    }
+}
+
 #[derive(Debug)]
 pub struct AppState<'a> {
     words: Vec<&'a str>,
@@ -11,7 +56,7 @@ pub struct AppState<'a> {
 
 impl<'a> AppState<'a> {
     pub fn new(content: &'a str, wpm: u64) -> Self {
-        let words: Vec<&'a str> = content.split_whitespace().collect();
+        let words = tokenize(content);
         let mut state = Self {
             words,
             current_word: 0,
@@ -119,6 +164,35 @@ mod tests {
     #[test]
     fn new_collapses_extra_whitespace() {
         assert_eq!(make_state("  one   two  ").total_words(), 2);
+    }
+
+    // --- tokenize ---
+
+    #[test]
+    fn tokenize_keeps_short_tokens_whole() {
+        assert_eq!(tokenize("iPhone well-known"), vec!["iPhone", "well-known"]);
+    }
+
+    #[test]
+    fn tokenize_splits_long_identifiers_on_camel_and_punct() {
+        let content = "`usePipSdkBootstrap`/`useReviewActions`/`useDraft`";
+        assert_eq!(
+            tokenize(content),
+            vec![
+                "use", "Pip", "Sdk", "Bootstrap", "use", "Review", "Actions", "use", "Draft"
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_splits_long_paths_on_slashes() {
+        let content = "src/ratatui/tachyonfx/effect-showcase/src/main.rs";
+        assert_eq!(
+            tokenize(content),
+            vec![
+                "src", "ratatui", "tachyonfx", "effect", "showcase", "src", "main", "rs"
+            ]
+        );
     }
 
     #[test]

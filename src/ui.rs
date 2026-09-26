@@ -95,9 +95,6 @@ pub fn render_word_display(
     let content_width = (inner_width + 2).max(40);
     let content_height = if opts.show_progress_bar { 2 } else { 1 };
 
-    // Focus char sits at the horizontal center of the content area.
-    let padding_left = content_width / 2 - left_width;
-
     // Border hugs the content instead of spanning the whole terminal.
     let show_border = opts.show_border && opts.border_color.is_some();
     let box_width = if show_border {
@@ -142,6 +139,11 @@ pub fn render_word_display(
     } else {
         box_rect
     };
+
+    // Center the focus char in the *visible* content area. When a word is
+    // wider than the box (clamped to the terminal), this keeps the focus
+    // letter on-screen instead of pushing the whole line off to the right.
+    let padding_left = (content_rect.width as usize / 2).saturating_sub(left_width);
 
     // Word line: left-aligned with the focus char centered via padding.
     let dim_style = Style::default().fg(Color::DarkGray);
