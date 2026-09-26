@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     prelude::*,
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, LineGauge, Paragraph},
@@ -18,25 +18,6 @@ pub struct RenderOptions {
     pub enable_animations: bool,
     pub show_border: bool,
     pub show_progress_bar: bool,
-}
-
-pub struct UIConstraints {
-    pub constraints: Vec<Constraint>,
-}
-
-impl UIConstraints {
-    pub fn new(is_inline: bool) -> Self {
-        let (top_pct, bot_pct): (u16, u16) = if !is_inline { (50, 50) } else { (10, 10) };
-
-        let constraints = vec![
-            Constraint::Percentage(top_pct),
-            Constraint::Min(1),    // word line
-            Constraint::Length(2), // progress bar
-            Constraint::Percentage(bot_pct),
-        ];
-
-        Self { constraints }
-    }
 }
 
 /// Draws a border progressively with cyberpunk effects (0.0 to 1.0)
@@ -238,7 +219,6 @@ fn find_focus_point(word: &str) -> usize {
 pub fn render_word_display(
     frame: &mut Frame,
     state: &AppState,
-    constraints: &UIConstraints,
     opts: &RenderOptions,
     border_progress: Option<f32>,
     time_ms: u64,
@@ -251,42 +231,6 @@ pub fn render_word_display(
     let total_words = state.total_words();
     let is_paused = state.is_paused();
 
-    // Draw a border around the viewport when enabled (both inline and fullscreen)
-    let inner_area = if opts.show_border {
-        if let Some(base_border_color) = opts.border_color {
-            let inner = Rect {
-                x: area.x + 1,
-                y: area.y + 1,
-                width: area.width.saturating_sub(2),
-                height: area.height.saturating_sub(2),
-            };
-
-            if opts.enable_animations {
-                // Progressive border while animating, otherwise full border + scanner
-                if let Some(progress) = border_progress {
-                    draw_progressive_border(frame.buffer_mut(), area, progress, base_border_color);
-                } else {
-                    draw_progressive_border(frame.buffer_mut(), area, 1.0, base_border_color);
-                    draw_border_scanner(frame.buffer_mut(), area, time_ms, base_border_color);
-                }
-            } else {
-                // No animations - just draw a simple border
-                draw_progressive_border(frame.buffer_mut(), area, 1.0, base_border_color);
-            }
-
-            inner
-        } else {
-            area
-        }
-    } else {
-        area
-    };
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints.constraints.clone())
-        .split(inner_area);
-
     let focus_idx = find_focus_point(word);
     let chars: Vec<char> = word.chars().collect();
 
@@ -298,15 +242,87 @@ pub fn render_word_display(
         .unwrap_or_default();
     let after: String = chars.iter().skip(focus_idx + 1).collect();
 
-    // Calculate padding to center the focus character.
-    // Use display width (UnicodeWidthStr) rather than byte length so multibyte
-    // and wide characters before the focus point don't skew the centering.
-    let term_width = chunks[1].width as usize;
-    let focus_position = term_width / 2;
+    // Display widths (not byte lengths) so wide/multibyte chars center correctly.
     let before_width = UnicodeWidthStr::width(before.as_str());
-    let padding_left = focus_position.saturating_sub(before_width);
+    let focus_width = UnicodeWidthStr::width(focus.as_str());
+    let after_width = UnicodeWidthStr::width(after.as_str());
+    let preview_width: usize = preview_words
+        .iter()
+        .map(|pw| UnicodeWidthStr::width(format!(" {}", pw).as_str()))
+        .sum();
 
-    // Build the line: current word + preview words appended inline
+    let left_width = before_width;
+    let right_width = focus_width + after_width + preview_width;
+
+    // Progress label needs horizontal room; include it when sizing the box.
+    let label_prefix = if is_paused { "⏸ " } else { "▶ " };
+    let progress_label = format!("{}{}/{}", label_prefix, current_word + 1, total_words);
+    let progress_label_width = UnicodeWidthStr::width(progress_label.as_str());
+
+    // Inner width: wide enough to center the focus char and fit the progress label.
+    let half_width = left_width.max(right_width);
+    let word_width = (half_width * 2).max(2);
+    let progress_width = progress_label_width + 6;
+    let inner_width = word_width.max(progress_width);
+
+    // One column of padding on each side, inside the border. The box also
+    // keeps a little extra width beyond the word so future info (e.g. near
+    // the progress/page-count label) has room to sit without crowding.
+    let content_width = (inner_width + 2).max(40);
+    let content_height = if opts.show_progress_bar { 2 } else { 1 };
+
+    // Focus char sits at the horizontal center of the content area.
+    let padding_left = content_width / 2 - left_width;
+
+    // Border hugs the content instead of spanning the whole terminal.
+    let show_border = opts.show_border && opts.border_color.is_some();
+    let box_width = if show_border {
+        content_width + 2
+    } else {
+        content_width
+    }
+    .min(area.width as usize);
+    let box_height = if show_border {
+        content_height + 2
+    } else {
+        content_height
+    }
+    .min(area.height as usize);
+
+    // Center the box in the available area.
+    let box_rect = Rect {
+        x: area.x + (area.width as usize - box_width) as u16 / 2,
+        y: area.y + (area.height as usize - box_height) as u16 / 2,
+        width: box_width as u16,
+        height: box_height as u16,
+    };
+
+    let content_rect = if show_border {
+        if let Some(base_border_color) = opts.border_color {
+            if opts.enable_animations {
+                // Progressive border while animating, otherwise full border + scanner
+                if let Some(progress) = border_progress {
+                    draw_progressive_border(frame.buffer_mut(), box_rect, progress, base_border_color);
+                } else {
+                    draw_progressive_border(frame.buffer_mut(), box_rect, 1.0, base_border_color);
+                    draw_border_scanner(frame.buffer_mut(), box_rect, time_ms, base_border_color);
+                }
+            } else {
+                // No animations - just draw a simple border
+                draw_progressive_border(frame.buffer_mut(), box_rect, 1.0, base_border_color);
+            }
+        }
+        Rect {
+            x: box_rect.x + 1,
+            y: box_rect.y + 1,
+            width: box_rect.width.saturating_sub(2),
+            height: box_rect.height.saturating_sub(2),
+        }
+    } else {
+        box_rect
+    };
+
+    // Word line: left-aligned with the focus char centered via padding.
     let dim_style = Style::default().fg(Color::DarkGray);
     let mut spans = vec![
         Span::raw(" ".repeat(padding_left)),
@@ -314,17 +330,28 @@ pub fn render_word_display(
         Span::styled(&focus, Style::default().fg(opts.focus_color).bold()),
         Span::raw(&after),
     ];
-    for &preview_word in preview_words.iter() {
+    for preview_word in preview_words.iter() {
         spans.push(Span::styled(format!(" {}", preview_word), dim_style));
     }
     let line = Line::from(spans);
 
-    let paragraph = Paragraph::new(line).alignment(Alignment::Left);
-    frame.render_widget(paragraph, chunks[1]);
+    let word_rect = Rect {
+        x: content_rect.x,
+        y: content_rect.y,
+        width: content_rect.width,
+        height: 1,
+    };
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Left), word_rect);
 
-    // Render progress bar if enabled
-    let progress_chunk_idx = 2;
-    let progress_area = if opts.show_progress_bar {
+    // Progress bar sits directly below the word line.
+    let progress_area = Rect {
+        x: content_rect.x,
+        y: content_rect.y + 1,
+        width: content_rect.width,
+        height: 1,
+    };
+
+    if opts.show_progress_bar {
         let progress = (current_word + 1) as f64 / total_words as f64;
 
         // Apply pulsing effect if animations are enabled
@@ -350,9 +377,6 @@ pub fn render_word_display(
             opts.progress_bar_color // No animations - use config color as-is
         };
 
-        let label_prefix = if is_paused { "⏸ " } else { "▶ " };
-        let progress_label = format!("{}{}/{}", label_prefix, current_word + 1, total_words);
-
         // Custom progress bar with transparent background (respects terminal)
         let progress_bar = LineGauge::default()
             .filled_style(Style::default().fg(fg_color).add_modifier(Modifier::BOLD))
@@ -361,15 +385,12 @@ pub fn render_word_display(
             .ratio(progress)
             .label(progress_label);
 
-        frame.render_widget(progress_bar, chunks[progress_chunk_idx]);
-        chunks[progress_chunk_idx]
+        frame.render_widget(progress_bar, progress_area);
+        progress_area
     } else {
         // Return empty area if progress bar is disabled
         Rect::default()
-    };
-
-    // Return progress bar area for effects
-    progress_area
+    }
 }
 
 /// Renders a centered help popup overlaying the current frame.
@@ -560,33 +581,4 @@ mod tests {
         );
     }
 
-    // --- UIConstraints ---
-
-    #[test]
-    fn ui_constraints_inline_has_four_rows() {
-        let ui = UIConstraints::new(true);
-        assert_eq!(ui.constraints.len(), 4);
-    }
-
-    #[test]
-    fn ui_constraints_fullscreen_has_four_rows() {
-        let ui = UIConstraints::new(false);
-        assert_eq!(ui.constraints.len(), 4);
-    }
-
-    #[test]
-    fn ui_constraints_inline_uses_small_padding() {
-        use ratatui::layout::Constraint;
-        let ui = UIConstraints::new(true);
-        assert!(matches!(ui.constraints[0], Constraint::Percentage(10)));
-        assert!(matches!(ui.constraints[3], Constraint::Percentage(10)));
-    }
-
-    #[test]
-    fn ui_constraints_fullscreen_uses_fifty_percent_padding() {
-        use ratatui::layout::Constraint;
-        let ui = UIConstraints::new(false);
-        assert!(matches!(ui.constraints[0], Constraint::Percentage(50)));
-        assert!(matches!(ui.constraints[3], Constraint::Percentage(50)));
-    }
 }

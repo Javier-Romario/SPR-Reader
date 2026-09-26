@@ -136,6 +136,64 @@ CLI flags `--inline` and `--preview-words` override config for that invocation.
 
 ---
 
+## Neovim plugin
+
+Speed-read text without leaving Neovim. The plugin grabs the visual selection (or buffer/line), writes it to a temp file, and runs `spr` in a floating terminal window.
+
+Layout lives under [`nvim/`](nvim/) in this repo — point your plugin manager at it, or symlink into `~/.config/nvim`.
+
+### lazy.nvim
+
+```lua
+{
+  dir = "~/path/to/SPR-Reader/nvim",
+  name = "spr.nvim",
+  opts = {
+    wpm = 450,
+    inline = true,
+    preview_words = 3,
+  },
+}
+```
+
+Requires `spr` on your `PATH` (or set `opts.bin = "/path/to/spr"`).
+
+### Commands
+
+| Command | Action |
+|:--------|:-------|
+| `:SprRead` | Read the visual selection (also `:'<,'>SprRead`) |
+| `:SprReadBuffer` | Read the whole buffer |
+| `:SprReadLine` | Read the current line |
+
+### Default keymaps
+
+| Key | Action |
+|:----|:-------|
+| `<leader>sr` (visual) | Read selection |
+| `<leader>sb` | Read buffer |
+| `<leader>sl` | Read line |
+
+Disable with `vim.g.spr_no_default_maps = true`.
+
+### Configuration
+
+```lua
+require("spr").defaults = {
+  bin = "spr",
+  wpm = 300,
+  inline = true,
+  preview_words = 0,
+  window = {
+    width = 42,   -- columns (>1) or fraction of editor width (<=1)
+    height = 5,   -- rows (>1) or fraction of editor height (<=1)
+    border = "none",
+  },
+}
+```
+
+---
+
 ## Keybindings
 
 | Key | Action |

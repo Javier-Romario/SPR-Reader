@@ -38,7 +38,6 @@ fn add_progress_scanner_effect(buffer: &mut Buffer, area: Rect, time_ms: u64) {
 pub fn run(
     content: &str,
     wpm: u64,
-    is_inline: bool,
     preview_words: Option<usize>,
     config: &Config,
     terminal: &mut Tui,
@@ -46,7 +45,6 @@ pub fn run(
     let mut app_state = AppState::new(content, wpm);
 
     let preview_count = preview_words.unwrap_or(config.preview_words);
-    let ui_constraints = ui::UIConstraints::new(is_inline);
 
     let border_color = if config.show_border {
         Some(config.parse_border_color())
@@ -99,7 +97,6 @@ pub fn run(
             let progress_area = ui::render_word_display(
                 f,
                 &app_state,
-                &ui_constraints,
                 &render_opts,
                 border_progress,
                 time_ms,

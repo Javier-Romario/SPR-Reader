@@ -35,7 +35,6 @@ fn main() -> Result<()> {
     app::run(
         &content,
         args.wpm,
-        is_inline,
         args.preview_words,
         &config,
         &mut terminal,
