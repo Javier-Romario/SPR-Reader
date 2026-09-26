@@ -3,25 +3,243 @@ use std::time::{Duration, Instant};
 /// Tokens longer than this are split further so a single flash stays readable.
 const LONG_TOKEN_CHARS: usize = 24;
 
-/// Split `content` into reading units. Whitespace is the primary separator;
-/// unusually long tokens (code identifiers, paths, URLs) are additionally split
-/// on punctuation and camelCase boundaries so they don't render as one giant
-/// unreadable (or clipped) flash.
-fn tokenize(content: &str) -> Vec<&str> {
+/// How a token should be rendered, derived from its Markdown context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenKind {
+    Normal,
+    Bold,
+    Italic,
+    BoldItalic,
+    Code,
+    Heading,
+    Link,
+    Strikethrough,
+    Blockquote,
+}
+
+/// A single reading unit: the visible text plus its Markdown-derived kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Token<'a> {
+    pub text: &'a str,
+    pub kind: TokenKind,
+}
+
+/// Split Markdown content into reading units, stripping the Markdown syntax and
+/// tagging each token with its kind so the reader can highlight it correctly.
+///
+/// Handles headings, blockquotes, lists, fenced code blocks, horizontal rules,
+/// inline code, bold/italic (self-contained and spanning), strikethrough, and
+/// links.
+fn tokenize(content: &str) -> Vec<Token<'_>> {
     let mut out = Vec::new();
-    for token in content.split_whitespace() {
-        if token.chars().count() <= LONG_TOKEN_CHARS {
-            out.push(token);
-        } else {
-            split_long_token(token, &mut out);
+    let mut in_fence = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+
+        // Toggle fenced code blocks (``` or ~~~), skipping the fence lines.
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
         }
+
+        if in_fence {
+            for token in line.split_whitespace() {
+                out.push(Token { text: token, kind: TokenKind::Code });
+            }
+            continue;
+        }
+
+        // Blockquote.
+        let (body, base) = if let Some(rest) = trimmed.strip_prefix('>') {
+            (rest.strip_prefix(' ').unwrap_or(rest), TokenKind::Blockquote)
+        } else {
+            (line, TokenKind::Normal)
+        };
+
+        // Heading (hashes followed by a space, per CommonMark).
+        let (body, base) = match strip_heading(body) {
+            Some(rest) => (rest, TokenKind::Heading),
+            None => (body, base),
+        };
+
+        // Horizontal rule.
+        if is_horizontal_rule(body) {
+            continue;
+        }
+
+        // List marker (-, *, +, N., N)) is dropped; the text reads normally.
+        let body = strip_list_marker(body).unwrap_or(body);
+
+        push_inline(body, base, &mut out);
     }
+
     out
 }
 
+fn strip_heading(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.chars().take_while(|&c| c == '#').count();
+    if hashes == 0 || hashes > 6 {
+        return None;
+    }
+    let rest = &trimmed[hashes..];
+    rest.strip_prefix(' ')
+}
+
+fn is_horizontal_rule(line: &str) -> bool {
+    let t = line.trim();
+    if t.len() < 3 {
+        return false;
+    }
+    let c = t.as_bytes()[0];
+    (c == b'-' || c == b'*' || c == b'_') && t.bytes().all(|b| b == c)
+}
+
+fn strip_list_marker(line: &str) -> Option<&str> {
+    let t = line.trim_start();
+    if let Some(rest) = t
+        .strip_prefix("- ")
+        .or_else(|| t.strip_prefix("* "))
+        .or_else(|| t.strip_prefix("+ "))
+    {
+        return Some(rest);
+    }
+    let digits = t.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 {
+        let rest = &t[digits..];
+        if let Some(rest) = rest.strip_prefix(". ").or_else(|| rest.strip_prefix(") ")) {
+            return Some(rest);
+        }
+    }
+    None
+}
+
+fn push_inline<'a>(line: &'a str, base: TokenKind, out: &mut Vec<Token<'a>>) {
+    let mut bold = false;
+    let mut italic = false;
+    let mut code = false;
+    let mut strike = false;
+
+    for raw in line.split_whitespace() {
+        let (text, kind) = classify_inline(raw, &mut bold, &mut italic, &mut code, &mut strike);
+        if text.is_empty() {
+            continue;
+        }
+        let kind = if kind == TokenKind::Normal { base } else { kind };
+        if text.chars().count() > LONG_TOKEN_CHARS {
+            split_long_token(text, kind, out);
+        } else {
+            out.push(Token { text, kind });
+        }
+    }
+}
+
+fn classify_inline<'a>(
+    raw: &'a str,
+    bold: &mut bool,
+    italic: &mut bool,
+    code: &mut bool,
+    strike: &mut bool,
+) -> (&'a str, TokenKind) {
+    // Inline code (backticks), including spanning across tokens.
+    if *code {
+        if raw.ends_with('`') {
+            *code = false;
+            return (raw.trim_end_matches('`'), TokenKind::Code);
+        }
+        return (raw, TokenKind::Code);
+    }
+    if raw.starts_with('`') {
+        if raw.len() >= 2 && raw.ends_with('`') {
+            return (raw.trim_matches('`'), TokenKind::Code);
+        }
+        *code = true;
+        return (raw.trim_start_matches('`'), TokenKind::Code);
+    }
+
+    // Strikethrough (~~).
+    if raw.starts_with("~~") && raw.ends_with("~~") && raw.len() >= 4 {
+        return (
+            raw.trim_start_matches('~').trim_end_matches('~'),
+            TokenKind::Strikethrough,
+        );
+    }
+    if raw.starts_with("~~") {
+        *strike = true;
+        return (raw.trim_start_matches('~'), TokenKind::Strikethrough);
+    }
+    if raw.ends_with("~~") {
+        *strike = false;
+        return (raw.trim_end_matches('~'), TokenKind::Strikethrough);
+    }
+    if *strike {
+        return (raw, TokenKind::Strikethrough);
+    }
+
+    // Links and images: [text](url), ![alt](url).
+    if let Some(rest) = raw.strip_prefix('!') {
+        if let Some(text) = link_text(rest) {
+            return (text, TokenKind::Link);
+        }
+    }
+    if let Some(text) = link_text(raw) {
+        return (text, TokenKind::Link);
+    }
+
+    // Emphasis (* and _): bold, italic, or bold-italic.
+    let lead = raw.len() - raw.trim_start_matches(['*', '_']).len();
+    let trail = raw.len() - raw.trim_end_matches(['*', '_']).len();
+    let text = if lead + trail <= raw.len() {
+        &raw[lead..raw.len() - trail]
+    } else {
+        ""
+    };
+
+    let kind = if lead >= 3 && trail >= 3 {
+        TokenKind::BoldItalic
+    } else if lead >= 2 && trail >= 2 {
+        TokenKind::Bold
+    } else if lead >= 1 && trail >= 1 {
+        TokenKind::Italic
+    } else if lead >= 2 {
+        *bold = true;
+        TokenKind::Bold
+    } else if trail >= 2 {
+        *bold = false;
+        TokenKind::Bold
+    } else if lead >= 1 {
+        *italic = true;
+        TokenKind::Italic
+    } else if trail >= 1 {
+        *italic = false;
+        TokenKind::Italic
+    } else if *bold && *italic {
+        TokenKind::BoldItalic
+    } else if *bold {
+        TokenKind::Bold
+    } else if *italic {
+        TokenKind::Italic
+    } else {
+        TokenKind::Normal
+    };
+
+    (text, kind)
+}
+
+fn link_text(raw: &str) -> Option<&str> {
+    let open = raw.find('[')?;
+    let close = raw[open + 1..].find(']')? + open + 1;
+    let text = &raw[open + 1..close];
+    if text.is_empty() {
+        return None;
+    }
+    Some(text)
+}
+
 /// Split a long token on punctuation and camelCase boundaries, dropping the
-/// separator characters themselves.
-fn split_long_token<'a>(token: &'a str, out: &mut Vec<&'a str>) {
+/// separator characters themselves and keeping the token's kind.
+fn split_long_token<'a>(token: &'a str, kind: TokenKind, out: &mut Vec<Token<'a>>) {
     let mut byte_start = 0;
     let mut prev_lower_or_digit = false;
 
@@ -31,9 +249,8 @@ fn split_long_token<'a>(token: &'a str, out: &mut Vec<&'a str>) {
 
         if is_punct || is_camel {
             if byte_start < bi {
-                out.push(&token[byte_start..bi]);
+                out.push(Token { text: &token[byte_start..bi], kind });
             }
-            // Skip punctuation; start the next segment at an uppercase char.
             byte_start = bi + if is_punct { c.len_utf8() } else { 0 };
         }
 
@@ -41,13 +258,13 @@ fn split_long_token<'a>(token: &'a str, out: &mut Vec<&'a str>) {
     }
 
     if byte_start < token.len() {
-        out.push(&token[byte_start..]);
+        out.push(Token { text: &token[byte_start..], kind });
     }
 }
 
 #[derive(Debug)]
 pub struct AppState<'a> {
-    words: Vec<&'a str>,
+    tokens: Vec<Token<'a>>,
     current_word: usize,
     paused: bool,
     wpm: u64,
@@ -56,9 +273,9 @@ pub struct AppState<'a> {
 
 impl<'a> AppState<'a> {
     pub fn new(content: &'a str, wpm: u64) -> Self {
-        let words = tokenize(content);
+        let tokens = tokenize(content);
         let mut state = Self {
-            words,
+            tokens,
             current_word: 0,
             paused: false,
             wpm,
@@ -87,7 +304,12 @@ impl<'a> AppState<'a> {
     }
 
     pub fn current_word(&self) -> Option<&str> {
-        self.words.get(self.current_word).copied()
+        self.tokens.get(self.current_word).map(|t| t.text)
+    }
+
+    /// The current token (text + kind) for styling.
+    pub fn current_token(&self) -> Option<&Token<'_>> {
+        self.tokens.get(self.current_word)
     }
 
     pub fn toggle_pause(&mut self) {
@@ -100,7 +322,7 @@ impl<'a> AppState<'a> {
 
     pub fn advance_word(&mut self) -> bool {
         self.current_word += 1;
-        if self.current_word >= self.words.len() {
+        if self.current_word >= self.tokens.len() {
             return false; // No more words
         }
         self.next_tick = Instant::now() + self.current_word_delay();
@@ -122,17 +344,17 @@ impl<'a> AppState<'a> {
     }
 
     pub fn total_words(&self) -> usize {
-        self.words.len()
+        self.tokens.len()
     }
 
     pub fn is_paused(&self) -> bool {
         self.paused
     }
 
-    /// Returns up to `count` words following the current word.
-    pub fn peek_words(&self, count: usize) -> Vec<&str> {
+    /// Upcoming tokens (text + kind) for preview styling.
+    pub fn peek_tokens(&self, count: usize) -> Vec<&Token<'_>> {
         let start = self.current_word + 1;
-        self.words[start..].iter().take(count).copied().collect()
+        self.tokens[start..].iter().take(count).collect()
     }
 
     /// Jump forward or backward by `delta` words (clamped to word bounds).
@@ -140,7 +362,7 @@ impl<'a> AppState<'a> {
     pub fn seek_word(&mut self, delta: isize) {
         let new_index = (self.current_word as isize + delta)
             .max(0)
-            .min((self.words.len() as isize).saturating_sub(1)) as usize;
+            .min((self.tokens.len() as isize).saturating_sub(1)) as usize;
         self.current_word = new_index;
         self.next_tick = Instant::now() + self.current_word_delay();
     }
@@ -168,18 +390,47 @@ mod tests {
 
     // --- tokenize ---
 
+    fn t(text: &str, kind: TokenKind) -> Token<'_> {
+        Token { text, kind }
+    }
+
+    use TokenKind::{Bold, BoldItalic, Blockquote, Code, Heading, Italic, Link, Normal, Strikethrough};
+
     #[test]
     fn tokenize_keeps_short_tokens_whole() {
-        assert_eq!(tokenize("iPhone well-known"), vec!["iPhone", "well-known"]);
+        assert_eq!(
+            tokenize("iPhone well-known"),
+            vec![t("iPhone", Normal), t("well-known", Normal)]
+        );
     }
 
     #[test]
-    fn tokenize_splits_long_identifiers_on_camel_and_punct() {
+    fn tokenize_inline_code_backticks() {
+        assert_eq!(
+            tokenize("the `usePipSdkBootstrap` hook"),
+            vec![
+                t("the", Normal),
+                t("usePipSdkBootstrap", Code),
+                t("hook", Normal),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_splits_long_code_identifiers_on_camel_and_punct() {
         let content = "`usePipSdkBootstrap`/`useReviewActions`/`useDraft`";
         assert_eq!(
             tokenize(content),
             vec![
-                "use", "Pip", "Sdk", "Bootstrap", "use", "Review", "Actions", "use", "Draft"
+                t("use", Code),
+                t("Pip", Code),
+                t("Sdk", Code),
+                t("Bootstrap", Code),
+                t("use", Code),
+                t("Review", Code),
+                t("Actions", Code),
+                t("use", Code),
+                t("Draft", Code),
             ]
         );
     }
@@ -190,7 +441,93 @@ mod tests {
         assert_eq!(
             tokenize(content),
             vec![
-                "src", "ratatui", "tachyonfx", "effect", "showcase", "src", "main", "rs"
+                t("src", Normal),
+                t("ratatui", Normal),
+                t("tachyonfx", Normal),
+                t("effect", Normal),
+                t("showcase", Normal),
+                t("src", Normal),
+                t("main", Normal),
+                t("rs", Normal),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_emphasis() {
+        assert_eq!(
+            tokenize("**bold** and *italic* and ***both***"),
+            vec![
+                t("bold", Bold),
+                t("and", Normal),
+                t("italic", Italic),
+                t("and", Normal),
+                t("both", BoldItalic),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_spanning_bold() {
+        assert_eq!(
+            tokenize("**bold phrase** here"),
+            vec![
+                t("bold", Bold),
+                t("phrase", Bold),
+                t("here", Normal),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_link() {
+        assert_eq!(
+            tokenize("see [docs](https://example.com) now"),
+            vec![
+                t("see", Normal),
+                t("docs", Link),
+                t("now", Normal),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_heading() {
+        assert_eq!(
+            tokenize("# Title here"),
+            vec![t("Title", Heading), t("here", Heading)]
+        );
+    }
+
+    #[test]
+    fn tokenize_blockquote() {
+        assert_eq!(
+            tokenize("> quoted text"),
+            vec![t("quoted", Blockquote), t("text", Blockquote)]
+        );
+    }
+
+    #[test]
+    fn tokenize_code_fence() {
+        let md = "```\nfn main() {}\n```";
+        assert_eq!(
+            tokenize(md),
+            vec![
+                t("fn", Code),
+                t("main()", Code),
+                t("{}", Code),
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_strikethrough_and_list() {
+        assert_eq!(
+            tokenize("- ~~done~~ and *more*"),
+            vec![
+                t("done", Strikethrough),
+                t("and", Normal),
+                t("more", Italic),
             ]
         );
     }
@@ -310,30 +647,32 @@ mod tests {
         assert_eq!(state.current_word_index(), 1);
     }
 
-    // --- peek_words ---
+    // --- peek_tokens ---
 
     #[test]
-    fn peek_words_returns_upcoming() {
+    fn peek_tokens_returns_upcoming() {
         let state = make_state("one two three four");
-        assert_eq!(state.peek_words(2), vec!["two", "three"]);
+        let got: Vec<&str> = state.peek_tokens(2).iter().map(|t| t.text).collect();
+        assert_eq!(got, vec!["two", "three"]);
     }
 
     #[test]
-    fn peek_words_zero_count_is_empty() {
-        assert!(make_state("one two three").peek_words(0).is_empty());
+    fn peek_tokens_zero_count_is_empty() {
+        assert!(make_state("one two three").peek_tokens(0).is_empty());
     }
 
     #[test]
-    fn peek_words_count_exceeds_remaining() {
+    fn peek_tokens_count_exceeds_remaining() {
         let state = make_state("one two three");
-        assert_eq!(state.peek_words(10), vec!["two", "three"]);
+        let got: Vec<&str> = state.peek_tokens(10).iter().map(|t| t.text).collect();
+        assert_eq!(got, vec!["two", "three"]);
     }
 
     #[test]
-    fn peek_words_at_last_word_is_empty() {
+    fn peek_tokens_at_last_word_is_empty() {
         let mut state = make_state("one two");
         state.seek_word(1); // at "two"
-        assert!(state.peek_words(3).is_empty());
+        assert!(state.peek_tokens(3).is_empty());
     }
 
     // --- wpm / timing ---

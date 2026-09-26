@@ -1,4 +1,4 @@
-use crate::state::AppState;
+use crate::state::{AppState, TokenKind};
 use ratatui::{
     layout::{Alignment, Rect},
     prelude::*,
@@ -29,6 +29,30 @@ pub struct RenderAreas {
     pub progress: Rect,
 }
 
+/// Style for a token kind. The focus letter is styled separately so it stays
+/// readable; this highlights Markdown structure (bold, code, links, ...).
+fn kind_style(kind: TokenKind, opts: &RenderOptions) -> Style {
+    match kind {
+        TokenKind::Normal => Style::default(),
+        TokenKind::Bold => Style::default().add_modifier(Modifier::BOLD),
+        TokenKind::Italic => Style::default().add_modifier(Modifier::ITALIC),
+        TokenKind::BoldItalic => {
+            Style::default().add_modifier(Modifier::BOLD | Modifier::ITALIC)
+        }
+        TokenKind::Code => Style::default().fg(Color::LightCyan).bg(Color::DarkGray),
+        TokenKind::Heading => Style::default()
+            .fg(opts.focus_color)
+            .add_modifier(Modifier::BOLD),
+        TokenKind::Link => Style::default()
+            .fg(Color::LightBlue)
+            .add_modifier(Modifier::UNDERLINED),
+        TokenKind::Strikethrough => Style::default().add_modifier(Modifier::CROSSED_OUT),
+        TokenKind::Blockquote => Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    }
+}
+
 /// Find the optimal focus point (character index) for a word
 /// Uses a heuristic similar to Spritz speed reading
 fn find_focus_point(word: &str) -> usize {
@@ -49,8 +73,10 @@ pub fn render_word_display(
 ) -> RenderAreas {
     let area = frame.area();
 
-    let word = state.current_word().unwrap_or("");
-    let preview_words = state.peek_words(opts.preview_count);
+    let token = state.current_token();
+    let kind = token.map(|t| t.kind).unwrap_or(TokenKind::Normal);
+    let word = token.map(|t| t.text).unwrap_or("");
+    let preview_tokens = state.peek_tokens(opts.preview_count);
     let current_word = state.current_word_index();
     let total_words = state.total_words();
     let is_paused = state.is_paused();
@@ -70,9 +96,9 @@ pub fn render_word_display(
     let before_width = UnicodeWidthStr::width(before.as_str());
     let focus_width = UnicodeWidthStr::width(focus.as_str());
     let after_width = UnicodeWidthStr::width(after.as_str());
-    let preview_width: usize = preview_words
+    let preview_width: usize = preview_tokens
         .iter()
-        .map(|pw| UnicodeWidthStr::width(format!(" {}", pw).as_str()))
+        .map(|pt| UnicodeWidthStr::width(format!(" {}", pt.text).as_str()))
         .sum();
 
     let left_width = before_width;
@@ -146,15 +172,18 @@ pub fn render_word_display(
     let padding_left = (content_rect.width as usize / 2).saturating_sub(left_width);
 
     // Word line: left-aligned with the focus char centered via padding.
-    let dim_style = Style::default().fg(Color::DarkGray);
+    // Markdown structure is styled by token kind; the focus letter keeps its
+    // own color so it stays prominent regardless of the surrounding syntax.
+    let word_style = kind_style(kind, opts);
     let mut spans = vec![
         Span::raw(" ".repeat(padding_left)),
-        Span::raw(&before),
+        Span::styled(before, word_style),
         Span::styled(&focus, Style::default().fg(opts.focus_color).bold()),
-        Span::raw(&after),
+        Span::styled(after, word_style),
     ];
-    for preview_word in preview_words.iter() {
-        spans.push(Span::styled(format!(" {}", preview_word), dim_style));
+    for pt in preview_tokens.iter() {
+        let style = kind_style(pt.kind, opts).fg(Color::DarkGray);
+        spans.push(Span::styled(format!(" {}", pt.text), style));
     }
     let line = Line::from(spans);
 
