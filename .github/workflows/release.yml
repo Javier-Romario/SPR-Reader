@@ -19,7 +19,9 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: spr-macos-arm64
-          - os: macos-13
+          # macos-13 (last Intel runner label) was retired; arm64 runners
+          # cross-compile x86_64-apple-darwin natively via the Apple SDK.
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact: spr-macos-x86_64
           - os: ubuntu-latest
