@@ -3,6 +3,9 @@ use std::time::{Duration, Instant};
 /// Tokens longer than this are split further so a single flash stays readable.
 const LONG_TOKEN_CHARS: usize = 24;
 
+/// Upper bound for the WPM gauge (and the ceiling `adjust_wpm` clamps to).
+pub const MAX_WPM: u64 = 1000;
+
 /// How a token should be rendered, derived from its Markdown context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
@@ -30,7 +33,7 @@ pub struct Token<'a> {
 /// Handles headings, blockquotes, lists, fenced code blocks, horizontal rules,
 /// inline code, bold/italic (self-contained and spanning), strikethrough, and
 /// links.
-fn tokenize(content: &str) -> Vec<Token<'_>> {
+pub fn tokenize(content: &str) -> Vec<Token<'_>> {
     let mut out = Vec::new();
     let mut in_fence = false;
 
@@ -227,9 +230,11 @@ fn classify_inline<'a>(
     (text, kind)
 }
 
+/// Extract the visible text of a `[text](url)` link. Requires the `](`
+/// pair so plain brackets (`array[0]`, `see[1]`) are left alone.
 fn link_text(raw: &str) -> Option<&str> {
     let open = raw.find('[')?;
-    let close = raw[open + 1..].find(']')? + open + 1;
+    let close = raw[open + 1..].find("](")? + open + 1;
     let text = &raw[open + 1..close];
     if text.is_empty() {
         return None;
@@ -269,6 +274,10 @@ pub struct AppState<'a> {
     paused: bool,
     wpm: u64,
     next_tick: Instant,
+    /// True while the user is nudging WPM with ↑/↓; freezes the word and
+    /// swaps the progress bar for a WPM gauge until the input goes idle.
+    adjusting: bool,
+    last_adjust: Instant,
 }
 
 impl<'a> AppState<'a> {
@@ -280,6 +289,8 @@ impl<'a> AppState<'a> {
             paused: false,
             wpm,
             next_tick: Instant::now(),
+            adjusting: false,
+            last_adjust: Instant::now(),
         };
         state.next_tick = Instant::now() + state.current_word_delay();
         state
@@ -317,7 +328,7 @@ impl<'a> AppState<'a> {
     }
 
     pub fn should_advance(&self) -> bool {
-        Instant::now() >= self.next_tick && !self.paused
+        Instant::now() >= self.next_tick && !self.paused && !self.adjusting
     }
 
     pub fn advance_word(&mut self) -> bool {
@@ -330,10 +341,10 @@ impl<'a> AppState<'a> {
     }
 
     pub fn get_timeout(&self) -> Duration {
-        if self.paused {
-            // Block briefly while paused; key events still wake the poll
-            // immediately, so responsiveness is unaffected. Avoids a busy loop
-            // once `next_tick` has elapsed.
+        if self.paused || self.adjusting {
+            // Block briefly while paused or adjusting; key events still wake
+            // the poll immediately, so responsiveness is unaffected. Avoids a
+            // busy loop once `next_tick` has elapsed.
             return Duration::from_millis(100);
         }
         self.next_tick.saturating_duration_since(Instant::now())
@@ -351,10 +362,46 @@ impl<'a> AppState<'a> {
         self.paused
     }
 
+    pub fn wpm(&self) -> u64 {
+        self.wpm
+    }
+
+    pub fn is_adjusting(&self) -> bool {
+        self.adjusting
+    }
+
+    /// Nudge WPM up or down by `delta`, clamped to `1..=MAX_WPM`. Enters
+    /// adjust mode so the current word freezes and the progress bar becomes a
+    /// WPM gauge. The landed-on word gets a full display window on resume.
+    pub fn adjust_wpm(&mut self, delta: i64) {
+        let current = self.wpm as i64;
+        self.wpm = (current + delta).clamp(1, MAX_WPM as i64) as u64;
+        self.adjusting = true;
+        self.last_adjust = Instant::now();
+        self.next_tick = Instant::now() + self.current_word_delay();
+    }
+
+    /// True once the user has stopped nudging WPM for `idle`.
+    pub fn should_end_adjust(&self, idle: Duration) -> bool {
+        self.adjusting && self.last_adjust.elapsed() >= idle
+    }
+
+    /// Leave adjust mode (caller decides when via `should_end_adjust`).
+    pub fn end_adjust(&mut self) {
+        self.adjusting = false;
+    }
+
+    /// Restart the current word's display window (e.g. after the help overlay
+    /// closes) so it isn't skipped the instant reading resumes.
+    pub fn restart_word_timer(&mut self) {
+        self.next_tick = Instant::now() + self.current_word_delay();
+    }
+
     /// Upcoming tokens (text + kind) for preview styling.
-    pub fn peek_tokens(&self, count: usize) -> Vec<&Token<'_>> {
-        let start = self.current_word + 1;
-        self.tokens[start..].iter().take(count).collect()
+    pub fn peek_tokens(&self, count: usize) -> &[Token<'a>] {
+        let start = (self.current_word + 1).min(self.tokens.len());
+        let end = (start + count).min(self.tokens.len());
+        &self.tokens[start..end]
     }
 
     /// Jump forward or backward by `delta` words (clamped to word bounds).
@@ -489,6 +536,26 @@ mod tests {
                 t("now", Normal),
             ]
         );
+    }
+
+    #[test]
+    fn tokenize_plain_brackets_are_not_links() {
+        assert_eq!(
+            tokenize("array[0] see[1]"),
+            vec![t("array[0]", Normal), t("see[1]", Normal)]
+        );
+    }
+
+    #[test]
+    fn tokenize_markdown_only_content_is_empty() {
+        assert!(tokenize("---").is_empty());
+        assert!(tokenize("```\n```").is_empty());
+        assert!(tokenize("**").is_empty());
+    }
+
+    #[test]
+    fn peek_tokens_on_empty_state_does_not_panic() {
+        assert!(make_state("---").peek_tokens(3).is_empty());
     }
 
     #[test]
@@ -721,5 +788,39 @@ mod tests {
         let mut state = AppState::new("go stop,", 300);
         state.advance_word(); // -> "stop," no extra delay
         assert!(state.get_timeout().as_millis() <= 250);
+    }
+
+    // --- wpm adjust ---
+
+    #[test]
+    fn adjust_wpm_changes_rate_and_enters_adjust_mode() {
+        let mut state = AppState::new("one two", 300);
+        assert!(!state.is_adjusting());
+        state.adjust_wpm(10);
+        assert_eq!(state.wpm(), 310);
+        assert!(state.is_adjusting());
+    }
+
+    #[test]
+    fn adjust_wpm_clamps_to_min_and_max() {
+        let mut state = AppState::new("one two", 5);
+        state.adjust_wpm(-100);
+        assert_eq!(state.wpm(), 1);
+
+        let mut state = AppState::new("one two", MAX_WPM);
+        state.adjust_wpm(100);
+        assert_eq!(state.wpm(), MAX_WPM);
+    }
+
+    #[test]
+    fn adjust_mode_freezes_word_then_ends_after_idle() {
+        let mut state = AppState::new("one two", 300);
+        state.adjust_wpm(10);
+        assert!(!state.should_advance(), "word frozen while adjusting");
+        assert!(!state.should_end_adjust(Duration::from_millis(1)));
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(state.should_end_adjust(Duration::from_millis(1)));
+        state.end_adjust();
+        assert!(!state.is_adjusting());
     }
 }

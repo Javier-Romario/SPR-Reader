@@ -1,4 +1,4 @@
-use crate::state::{AppState, TokenKind};
+use crate::state::{AppState, TokenKind, MAX_WPM};
 use ratatui::{
     layout::{Alignment, Rect},
     prelude::*,
@@ -11,7 +11,7 @@ use unicode_width::UnicodeWidthStr;
 /// need a dozen positional arguments.
 pub struct RenderOptions {
     pub preview_count: usize,
-    pub border_color: Option<Color>,
+    pub border_color: Color,
     pub progress_bar_color: Color,
     pub focus_color: Color,
     pub show_border: bool,
@@ -82,6 +82,8 @@ pub fn render_word_display(
     let current_word = state.current_word_index();
     let total_words = state.total_words();
     let is_paused = state.is_paused();
+    let is_adjusting = state.is_adjusting();
+    let wpm = state.wpm();
 
     let focus_idx = find_focus_point(word);
     let chars: Vec<char> = word.chars().collect();
@@ -107,8 +109,19 @@ pub fn render_word_display(
     let right_width = focus_width + after_width + preview_width;
 
     // Progress label needs horizontal room; include it when sizing the box.
-    let label_prefix = if is_paused { "⏸ " } else { "▶ " };
-    let progress_label = format!("{}{}/{}", label_prefix, current_word + 1, total_words);
+    // While adjusting WPM the bar becomes a WPM gauge instead of word progress.
+    let label_prefix = if is_adjusting {
+        "⚡ "
+    } else if is_paused {
+        "⏸ "
+    } else {
+        "▶ "
+    };
+    let progress_label = if is_adjusting {
+        format!("{} {} wpm", label_prefix, wpm)
+    } else {
+        format!("{}{}/{}", label_prefix, current_word + 1, total_words)
+    };
     let progress_label_width = UnicodeWidthStr::width(progress_label.as_str());
 
     // Inner width: wide enough to center the focus char and fit the progress label.
@@ -124,7 +137,7 @@ pub fn render_word_display(
     let content_height = if opts.show_progress_bar { 2 } else { 1 };
 
     // Border hugs the content instead of spanning the whole terminal.
-    let show_border = opts.show_border && opts.border_color.is_some();
+    let show_border = opts.show_border;
     let box_width = if show_border {
         content_width + 2
     } else {
@@ -148,13 +161,11 @@ pub fn render_word_display(
 
     // Draw the border around the box; TachyonFX reveals it on startup.
     if show_border {
-        if let Some(base_border_color) = opts.border_color {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Double)
-                .border_style(Style::default().fg(base_border_color));
-            frame.render_widget(block, box_rect);
-        }
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(Style::default().fg(opts.border_color));
+        frame.render_widget(block, box_rect);
     }
 
     let content_rect = if show_border {
@@ -174,13 +185,15 @@ pub fn render_word_display(
     let padding_left = (content_rect.width as usize / 2).saturating_sub(left_width);
 
     // Word line: left-aligned with the focus char centered via padding.
-    // Markdown structure is styled by token kind; the focus letter keeps its
-    // own color so it stays prominent regardless of the surrounding syntax.
+    // Markdown structure is styled by token kind; the focus letter inherits
+    // that style (code background, strikethrough, ...) but overrides the
+    // color so it stays prominent regardless of the surrounding syntax.
     let word_style = kind_style(kind, opts);
+    let focus_style = word_style.fg(opts.focus_color).add_modifier(Modifier::BOLD);
     let mut spans = vec![
         Span::raw(" ".repeat(padding_left)),
         Span::styled(before, word_style),
-        Span::styled(&focus, Style::default().fg(opts.focus_color).bold()),
+        Span::styled(&focus, focus_style),
         Span::styled(after, word_style),
     ];
     for pt in preview_tokens.iter() {
@@ -206,11 +219,17 @@ pub fn render_word_display(
     };
 
     if opts.show_progress_bar {
-        let progress = (current_word + 1) as f64 / total_words as f64;
-        let fg_color = if is_paused {
-            Color::Rgb(255, 165, 0) // Orange for paused
+        let (ratio, fg_color) = if is_adjusting {
+            // WPM gauge: fill fraction of MAX_WPM, green to signal "measure".
+            (wpm as f64 / MAX_WPM as f64, Color::LightGreen)
         } else {
-            opts.progress_bar_color
+            let progress = (current_word + 1) as f64 / total_words as f64;
+            let fg = if is_paused {
+                Color::Rgb(255, 165, 0) // Orange for paused
+            } else {
+                opts.progress_bar_color
+            };
+            (progress, fg)
         };
 
         // Custom progress bar with transparent background (respects terminal)
@@ -218,7 +237,7 @@ pub fn render_word_display(
             .filled_style(Style::default().fg(fg_color).add_modifier(Modifier::BOLD))
             .unfilled_style(Style::default().fg(Color::DarkGray))
             .line_set(symbols::line::THICK)
-            .ratio(progress)
+            .ratio(ratio)
             .label(progress_label);
 
         frame.render_widget(progress_bar, progress_rect);
@@ -295,11 +314,15 @@ pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16, se
             Span::raw(format!("Fast-forward {} words", seek_step)),
         ]),
         Line::from(vec![
+            Span::styled(format!("  {:<14}", "↑ / ↓"), key_style),
+            Span::raw("Adjust WPM (pauses)"),
+        ]),
+        Line::from(vec![
             Span::styled(format!("  {:<14}", "?"), key_style),
             Span::raw("Toggle this help"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {:<14}", "j / k / ↑↓"), key_style),
+            Span::styled(format!("  {:<14}", "j / k"), key_style),
             Span::raw("Scroll help"),
         ]),
         Line::from(""),
@@ -329,9 +352,9 @@ pub fn render_help_popup(frame: &mut Frame, border_color: Color, scroll: u16, se
 
     let block = if max_scroll > 0 {
         let hint = match (effective_scroll > 0, effective_scroll < max_scroll) {
-            (false, true) => " ↓ j/k ",
-            (true, true) => " ↑↓ j/k ",
-            (true, false) => " ↑ j/k ",
+            (false, true) => " j/k ↓ ",
+            (true, true) => " j/k ↑↓ ",
+            (true, false) => " j/k ↑ ",
             _ => "",
         };
         base_block.title_bottom(Line::from(Span::styled(
@@ -403,7 +426,7 @@ mod tests {
         let state = AppState::new("hello world", 300);
         let opts = RenderOptions {
             preview_count: 0,
-            border_color: Some(Color::Cyan),
+            border_color: Color::Cyan,
             progress_bar_color: Color::Cyan,
             focus_color: Color::Red,
             show_border: true,

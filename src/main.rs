@@ -20,8 +20,10 @@ fn main() -> Result<()> {
 
     let content = cli::get_content(&args)?;
 
-    // Validate content before initializing TUI
-    if content.split_whitespace().next().is_none() {
+    // Validate content before initializing TUI. Tokenize (not just
+    // split_whitespace) so Markdown-only input like `---` or an empty code
+    // fence is rejected here instead of panicking on an empty word list.
+    if state::tokenize(&content).is_empty() {
         return Err(
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "No words to display").into(),
         );
@@ -32,17 +34,17 @@ fn main() -> Result<()> {
 
     let mut terminal = tui::init(is_inline)?;
 
-    app::run(
+    // Always restore the terminal, even if the app loop errored out.
+    let result = app::run(
         &content,
         args.wpm,
         args.preview_words,
         &config,
         &mut terminal,
-    )?;
+    );
+    let restored = tui::restore(is_inline, &mut terminal);
 
-    tui::restore(is_inline, &mut terminal)?;
-
-    Ok(())
+    result.and(restored)
 }
 
 /// Restore the terminal even if a panic unwinds past `tui::restore`.
