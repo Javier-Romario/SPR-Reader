@@ -1,7 +1,20 @@
 [package]
-name = "spr"
-version = "0.1.0"
+name = "spr-reader"
+version = "0.2.0"
 edition = "2021"
+description = "Terminal speed reader with Spritz-style focus point highlighting"
+license = "MIT"
+repository = "https://github.com/Javier-Romario/SPR-Reader"
+readme = "README.md"
+keywords = ["speed-reading", "tui", "ratatui", "spritz", "reader"]
+categories = ["command-line-utilities"]
+exclude = ["demo.gif", "demo.tape", "Formula/", "nvim/", "flake.nix"]
+
+# The crate is `spr-reader` on crates.io (plain `spr` is taken), but the
+# installed command stays `spr`.
+[[bin]]
+name = "spr"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }

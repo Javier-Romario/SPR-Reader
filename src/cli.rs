@@ -6,7 +6,7 @@ use std::{
 };
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(name = "spr", author, version, about, long_about = None)]
 pub struct Args {
     /// Text to read
     #[arg(short, long, conflicts_with = "file")]

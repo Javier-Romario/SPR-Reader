@@ -57,6 +57,14 @@ inputs.spr.url = "github:Javier-Romario/SPR-Reader";
 inputs.spr.packages.${system}.default
 ```
 
+### Cargo (crates.io)
+
+```bash
+cargo install spr-reader
+```
+
+The crate is named `spr-reader` (plain `spr` was taken); the installed command is still `spr`.
+
 ### From source
 
 ```bash
