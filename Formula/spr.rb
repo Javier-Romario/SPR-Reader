@@ -1,8 +1,8 @@
 class Spr < Formula
   desc "Terminal speed reader with Spritz-style focus point highlighting"
   homepage "https://github.com/Javier-Romario/SPR-Reader"
-  url "https://github.com/Javier-Romario/SPR-Reader/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed"
+  url "https://github.com/Javier-Romario/SPR-Reader/archive/refs/tags/v0.2.0.tar.gz"
+  sha256 "fa1811fcf039059d31912e67cf551572099a6222222313abc73728dcc1ad82c4"
   license "MIT"
   head "https://github.com/Javier-Romario/SPR-Reader.git", branch: "main"
 
